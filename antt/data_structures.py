@@ -11,12 +11,18 @@ from queue import Queue
 import math
 
 
-DEBUG = False
+DEBUG = True
 
 
 def log(*text):
     if DEBUG:
         print("D:", *text)
+
+
+def log_txt(text):
+    if DEBUG:
+        with open("log.txt", "w") as f:
+            f.write(text)
 
 
 """
@@ -272,6 +278,7 @@ class SocketConnection(threading.Thread):
 
     def __init__(self, src_port: int, target: tuple[str, int], in_queue: Queue = None, out_queue: Queue = None):
         super().__init__()
+        self.daemon = True
         self.src_port = src_port
         self.target = target
         if in_queue:
@@ -338,21 +345,36 @@ class SocketConnection(threading.Thread):
         """
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("", self.src_port))
-        timeout_len = .5
-        self.socket.settimeout(timeout_len)
-        limit = 20
+        timeout_len = .1
+        time_limit = 1
+        limit = int(time_limit / timeout_len)
         count = 0
+        self.socket.settimeout(timeout_len)
+        log_txt("test")
         while count < limit and not self.verified_connection:
             try:
                 data = self.socket.recv(self.buffer_size)
+                # raise KeyboardInterrupt
+                print(f"trying {count} < {limit} : {data}")
                 if data == b"\x04":
+                    # print(f"verified {self.src_port}\n")
+                    log_txt(f"{self.src_port}: a\n")
                     self.verified_connection = True
                 elif data == b"\x03":
+                    log_txt(f"{self.src_port}: b\n")
                     self.socket.sendto(b"\x04", self.target)
+                else:
+                    log_txt(f"{self.src_port}: e\n")
             except TimeoutError:
+                log_txt(f"{self.src_port}: c\n")
+                self.socket.sendto(b"\x03", self.target)
+                count += 1
+            except socket.timeout:
+                log_txt(f"{self.src_port}: f\n")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
             except ConnectionResetError:
+                log_txt(f"{self.src_port}: d\n")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
                 time.sleep(timeout_len)
@@ -461,14 +483,18 @@ class SocketConnection(threading.Thread):
         self.frame_generator.buffer_size = size
         return self
 
-    def block_until_message(self) -> bytes:
-        sleep_time = .1
+    def block_until_message(self, timeout: int = 1) -> bytes:
+        sleep_len = .1
+        count = 0
         try:
-            while self.out_queue.empty():
-                time.sleep(sleep_time)
+            while self.out_queue.empty() and count < timeout / sleep_len:
+                time.sleep(sleep_len)
+                count += 1
+            if count == int(timeout / sleep_len):
+                raise KeyboardInterrupt  # There's probably a better way to do this
         except KeyboardInterrupt:
             self.in_queue.put("kill")
-        temp = self.out_queue.get()
+        temp = self.out_queue.get()  # fixme This is likely what actually kills the thread
         self.out_queue.task_done()
         return temp
 
