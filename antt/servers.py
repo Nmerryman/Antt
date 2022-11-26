@@ -31,15 +31,24 @@ class EchoServer(Thread):
 
 class LocateServer(Thread):
 
-    def __init__(self):
+    def __init__(self, info_port: int = None, other_ports: tuple[int, int, int] = None):
         super().__init__()
         self.daemon = True
         self.alive = True
 
-        self.info_port = ds.get_first_port_from(10010)
-        self.loc_port_a = ds.get_first_port_from(10020)
-        self.loc_port_b = ds.get_first_port_from(10030)
-        self.send_port_c = ds.get_first_port_from(10040)
+        # This should probably get reorganized by creating each socket before finding next port but this hack is ok for now
+        if info_port:
+            self.info_port = info_port
+        else:
+            self.info_port = ds.get_first_port_from(10010)
+        if other_ports:
+            self.loc_port_a = other_ports[0]
+            self.loc_port_b = other_ports[1]
+            self.send_port_c = other_ports[2]
+        else:
+            self.loc_port_a = ds.get_first_port_from(10020)
+            self.loc_port_b = ds.get_first_port_from(10030)
+            self.send_port_c = ds.get_first_port_from(10040)
         self.buffer_size = 256
         self.timeout_len = .1
 
