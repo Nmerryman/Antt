@@ -46,9 +46,9 @@ class LocateServer(Thread):
             self.loc_port_b = other_ports[1]
             self.send_port_c = other_ports[2]
         else:
-            self.loc_port_a = ds.get_first_port_from(10020)
-            self.loc_port_b = ds.get_first_port_from(10030)
-            self.send_port_c = ds.get_first_port_from(10040)
+            self.loc_port_a = ds.get_first_port_from(self.info_port + 10)
+            self.loc_port_b = ds.get_first_port_from(self.info_port + 20)
+            self.send_port_c = ds.get_first_port_from(self.info_port + 30)
         self.buffer_size = 256
         self.timeout_len = .1
 
@@ -69,6 +69,7 @@ class LocateServer(Thread):
         info_packet = ds.Packet(self.loc_port_a, self.loc_port_b)
         info_msg = info_packet.generate()
         while self.alive:
+            # Tell client important server ports
             try:
                 while True:
                     data, ip = self.info_socket.recvfrom(self.buffer_size)
@@ -76,6 +77,7 @@ class LocateServer(Thread):
             except socket.timeout:
                 pass
 
+            # Use as an echo for base location comparison + nat symmetric properties discovery
             try:
                 while True:
                     data, ip = self.loc_a_socket.recvfrom(self.buffer_size)
@@ -83,6 +85,8 @@ class LocateServer(Thread):
             except socket.timeout:
                 pass
 
+            # Extra echo to contrast different target location (port)
+            # send_c_socket is to check nat cone status
             try:
                 while True:
                     data, ip = self.loc_b_socket.recvfrom(self.buffer_size)
