@@ -11,7 +11,7 @@ from queue import Queue
 import math
 
 
-DEBUG = True
+DEBUG = False
 
 
 def log(*text):
@@ -354,10 +354,7 @@ class SocketConnection(threading.Thread):
         while count < limit and not self.verified_connection:
             try:
                 data = self.socket.recv(self.buffer_size)
-                # raise KeyboardInterrupt
-                print(f"trying {count} < {limit} : {data}")
                 if data == b"\x04":
-                    # print(f"verified {self.src_port}\n")
                     log_txt(f"{self.src_port}: a\n")
                     self.verified_connection = True
                 elif data == b"\x03":
