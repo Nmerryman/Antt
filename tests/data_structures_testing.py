@@ -1,9 +1,9 @@
 import antt.servers as s
 
 
-echo = s.EchoServer()
+echo = s.LocateServer()
 echo.start()
-print(echo.src_port)
+print(echo.info_port)
 input()
 echo.alive = False
 input()
