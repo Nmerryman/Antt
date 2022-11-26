@@ -6,7 +6,20 @@ from time import sleep
 assert_timeout = 3
 assert_delay = .01
 assert_limit = int(assert_timeout / assert_delay)
-# pytest.mark.filterwarnings("error")
+
+
+def test_packet_conversions():
+    base_string = "0123456789"
+    packet = ds.Packet(base_string, 1, None, [1, 2, 3])
+    packet_bytes = packet.generate()
+
+    new_packet = ds.Packet()
+    new_packet.parse(packet_bytes)
+
+    assert new_packet.type == base_string
+    assert new_packet.value == 1
+    assert new_packet.data == ""
+    assert new_packet.extra == [1, 2, 3]
 
 
 @pytest.mark.filterwarnings("error")
