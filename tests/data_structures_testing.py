@@ -1,7 +1,7 @@
 import antt.servers as s
 
 
-echo = s.LocateServer()
+echo = s.LocateServer(12345)
 echo.start()
 print(echo.info_port)
 input()
