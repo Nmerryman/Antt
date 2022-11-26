@@ -287,7 +287,7 @@ class SocketConnection(threading.Thread):
         self.max_unrequited_love = 3  # We may not care to check if incoming doesn't happen
         # noinspection PyTypeChecker
         self.socket: socket.socket = None
-        self.alive = True
+        self.alive = False
         self.buffer_size = 1024
         self.pre_parsed = []
         self.building_blocks = {}
@@ -320,6 +320,7 @@ class SocketConnection(threading.Thread):
                 if isinstance(val, str):
                     if val == "kill":
                         self.alive = False
+                        self._shutdown_socket()
                         return
                     self.out_queue.put((val, eval(val)))  # FIXME PROBABLY A MASSIVE SECURITY RISK
                 elif isinstance(val, bytes):
@@ -328,6 +329,8 @@ class SocketConnection(threading.Thread):
             if time.time() > self.last_action + self.max_no_action_delay:
                 self.send_heartbeat()
             time.sleep(.1)
+
+        self._shutdown_socket()
 
     def _setup_socket(self):
         """
@@ -359,6 +362,10 @@ class SocketConnection(threading.Thread):
 
         self.socket.settimeout(0)
         self.socket.setblocking(False)
+        self.alive = True
+
+    def _shutdown_socket(self):
+        self.socket.close()
 
     def distribute_stored(self):
         for a in self.pre_parsed:
