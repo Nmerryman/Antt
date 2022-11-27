@@ -1,10 +1,10 @@
+# Server
 import antt.servers as s
 
-
-echo = s.LocateServer(12345)
-echo.start()
-print(echo.info_port)
+server = s.RendezvousServer(12345)
+server.start()
+print(server.src_port)
 input()
-echo.alive = False
+server.alive = False
 input()
 
