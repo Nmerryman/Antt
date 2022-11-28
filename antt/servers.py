@@ -94,3 +94,52 @@ class LocateServer(Thread):
                     self.send_c_socket.sendto(f"c {ip[0]} {ip[1]}".encode(), ip)
             except socket.timeout:
                 pass
+
+
+class RendezvousServer(Thread):
+
+    def __init__(self, src_port: int = None):
+        super().__init__()
+        self.daemon = True
+
+        if src_port:
+            self.src_port = src_port
+        else:
+            self.src_port = ds.get_first_port_from(10100)
+
+        self.collection = {}
+        self.timeout_len = .1
+        self.buffer_size = 256
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind(("", self.src_port))
+        self.socket.settimeout(self.timeout_len)
+        self.alive = True
+
+    def run(self) -> None:
+        while self.alive:
+            try:
+                while True:
+                    data, ip = self.socket.recvfrom(self.buffer_size)
+                    packet = ds.Packet().parse(data)  # we assume {auth, channel_id, info_packet}
+                    if packet.type == "status":  # We're assuming that auth value can never be this
+                        if packet.value in self.collection:
+                            self.socket.sendto(ds.Packet(packet.value, "waiting").generate(), ip)
+                        else:
+                            self.socket.sendto(ds.Packet(packet.value, "missing").generate(), ip)
+                    else:
+                        # We're going to assume that auth is taken care of
+                        if packet.value not in self.collection:  # New channel
+                            self.collection[packet.value] = (ip, packet.data)
+                        else:  # Previous channel found
+                            if ip != self.collection[packet.type][0]:  # if from a different source ip
+                                # We fire the exchange
+                                # Send to orig
+                                self.socket.sendto(ds.Packet(packet.value, packet.data).generate(), self.collection[packet.value][0])
+                                # Send to latest
+                                self.socket.sendto(ds.Packet(packet.value, self.collection[packet.value][1]).generate(), ip)
+                                # Remove entry from collection
+                                del self.collection[packet.value]
+            except socket.timeout:
+                # Do other stuff like maintenance
+                pass
