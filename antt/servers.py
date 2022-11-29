@@ -15,7 +15,7 @@ class EchoServer(Thread):
         # I should probably propagate this "bind in init to ensure valid first" methodology
         self.buffer_size = 1000
         self.alive = True
-        self.timeout_len = .1
+        self.timeout_len = .05
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("", self.src_port))
 
