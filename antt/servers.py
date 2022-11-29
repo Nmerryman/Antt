@@ -132,7 +132,7 @@ class RendezvousServer(Thread):
                         if packet.value not in self.collection:  # New channel
                             self.collection[packet.value] = (ip, packet.data)
                         else:  # Previous channel found
-                            if ip != self.collection[packet.type][0]:  # if from a different source ip
+                            if ip != self.collection[packet.value][0]:  # if from a different source ip
                                 # We fire the exchange
                                 # Send to orig
                                 self.socket.sendto(ds.Packet(packet.value, packet.data).generate(), self.collection[packet.value][0])
