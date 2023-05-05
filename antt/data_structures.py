@@ -338,6 +338,8 @@ class SocketConnection(threading.Thread):
                         self.alive = False
                         self._shutdown_socket()
                         return
+                    elif val == "graceful kill":
+                        self.alive = False
                     self.out_queue.put((val, eval(val)))  # FIXME PROBABLY A MASSIVE SECURITY RISK
                 elif isinstance(val, bytes):
                     self.send_msg(val)
@@ -346,6 +348,7 @@ class SocketConnection(threading.Thread):
                 self.send_heartbeat()
             time.sleep(.1)
 
+        time.sleep(.1)
         self._shutdown_socket()
 
     def _setup_socket(self):
@@ -512,10 +515,10 @@ class SocketConnection(threading.Thread):
             self.in_queue.put("kill")
         try:
             temp = self.out_queue.get(timeout=3)  # fixme This is likely what actually kills the thread
+            self.out_queue.task_done()
         except Empty:
             print("No messages found? fexme")
             temp = "Nothing"
-        self.out_queue.task_done()
         return temp
 
 
