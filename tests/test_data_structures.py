@@ -70,6 +70,8 @@ def test_basic_socket_send():
     assert count != assert_limit
 
     message = receiver.block_until_message()
+    assert sender.verified_connection
+    assert receiver.verified_connection
     sender.in_queue.put("kill")
     receiver.in_queue.put("kill")
 
