@@ -1,5 +1,6 @@
 import antt.nat_traversal as nt
 from time import sleep
+import antt.data_structures as ds
 
 """
 Nat traversal module test
@@ -10,19 +11,23 @@ def main():
     src = nt.ConnInfo()
     src.punch_type = "cone"
     src.can_punch = True
-    src.private_port = 2222
+    src.private_port = 2225
 
     dest = nt.ConnInfo()
-    dest.punch_type = "symmetric"
+    dest.punch_type = "cone"
     dest.can_punch = True
     dest.public_ip = "127.0.0.1"
-    dest.public_port = 3333
+    dest.public_port = 3335
     dest.symmetric_range = (2000, 3000)
 
-    s = nt.start_connection(src, dest)
-    sleep(1)
+    # s = nt.start_connection(src, dest)
+    ds.DEBUG = True
+    s = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+    s.start()
+    s.block_until_verify(3)
 
     s.in_queue.put(b"Hello")
+    sleep(2)
     s.in_queue.put("kill")
 
 
