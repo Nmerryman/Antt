@@ -7,11 +7,13 @@ import socket
 import time
 import psutil
 import threading
-from queue import Queue
+from queue import Queue, Empty
 import math
 
 
-DEBUG = False
+DEBUG = True
+# Options all(default), verification
+TOPICS = {"all", "verification"}
 
 
 def log(*text):
@@ -19,9 +21,9 @@ def log(*text):
         print("D:", *text)
 
 
-def log_txt(text):
-    if DEBUG:
-        with open("log.txt", "w") as f:
+def log_txt(text, topic="all"):
+    if DEBUG and topic in TOPICS:
+        with open("log.txt", "a") as f:
             f.write(text)
 
 
@@ -275,12 +277,17 @@ class FrameGenerator:
 
 
 class SocketConnection(threading.Thread):
+    """
+    You are _looking at_ the thread. You are putting into and taking out of the thread/socket itself
+    """
 
     def __init__(self, src_port: int, target: tuple[str, int], in_queue: Queue = None, out_queue: Queue = None):
         super().__init__()
-        self.daemon = True
+        self.daemon = True  # Self terminating
+        # Dest info
         self.src_port = src_port
         self.target = target
+        # Init queue objects if needed
         if in_queue:
             self.in_queue = in_queue
         else:
@@ -289,19 +296,21 @@ class SocketConnection(threading.Thread):
             self.out_queue = out_queue
         else:
             self.out_queue = Queue()
+
         self.last_action = 0
         self.max_no_action_delay = 20
         self.max_unrequited_love = 3  # We may not care to check if incoming doesn't happen
         # noinspection PyTypeChecker
         self.socket: socket.socket = None
+
         self.alive = False
+        self.verified_connection = False
         self.buffer_size = 1024
         self.pre_parsed = []
         self.building_blocks = {}
         self.send_memory = {}
         self.partial_msg_max_count_bytes = int(math.log(self.buffer_size, 256) // 1 + 1)  # Used for splitting up internal messages
         self.frame_generator = FrameGenerator(self.buffer_size)
-        self.verified_connection = False
 
     def run(self) -> None:
         """
@@ -342,41 +351,44 @@ class SocketConnection(threading.Thread):
     def _setup_socket(self):
         """
         Little abstraction/modulation for which was used in testing
+        FIXME We have got to use a better flow
         """
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("", self.src_port))
         timeout_len = .1
-        time_limit = 1
+        time_limit = 2
         limit = int(time_limit / timeout_len)
         count = 0
         self.socket.settimeout(timeout_len)
-        log_txt("test")
+        log_txt(f"Setting up {self.src_port}\n", "verification")
         while count < limit and not self.verified_connection:
             try:
                 data = self.socket.recv(self.buffer_size)
                 if data == b"\x04":
-                    log_txt(f"{self.src_port}: a\n")
+                    log_txt(f"{self.src_port}: verify confirmed -> marking\n", "verification")
                     self.verified_connection = True
                 elif data == b"\x03":
-                    log_txt(f"{self.src_port}: b\n")
+                    log_txt(f"{self.src_port}: verify requested -> responding\n", "verification")
                     self.socket.sendto(b"\x04", self.target)
+                    self.verified_connection = True
                 else:
-                    log_txt(f"{self.src_port}: e\n")
+                    log_txt(f"{self.src_port}: recv {data} instead\n", "verification")
             except TimeoutError:
-                log_txt(f"{self.src_port}: c\n")
+                log_txt(f"{self.src_port}: con_error 1; send request\n", "verification")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
             except socket.timeout:
-                log_txt(f"{self.src_port}: f\n")
+                log_txt(f"{self.src_port}: con_error 2; send request\n", "verification")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
             except ConnectionResetError:
-                log_txt(f"{self.src_port}: d\n")
+                log_txt(f"{self.src_port}: con_error 3; send request\n", "verification")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
-                time.sleep(timeout_len)
+            time.sleep(timeout_len)
 
         if count == limit:
+            log_txt(f"{self.src_port}: Giving up verification\n", "verification")
             raise ConnectionNoResponse("Failed to verify socket on other side")
 
         self.socket.settimeout(0)
@@ -480,6 +492,13 @@ class SocketConnection(threading.Thread):
         self.frame_generator.buffer_size = size
         return self
 
+    def block_until_verify(self, timeout: int = 1):
+        start = time.time()
+        while not self.verified_connection:
+            if time.time() - start > timeout:
+                raise ConnectionIssue("Failed to verify in time.")
+            time.sleep(.01)
+
     def block_until_message(self, timeout: int = 1) -> bytes:
         sleep_len = .1
         count = 0
@@ -491,7 +510,11 @@ class SocketConnection(threading.Thread):
                 raise KeyboardInterrupt  # There's probably a better way to do this
         except KeyboardInterrupt:
             self.in_queue.put("kill")
-        temp = self.out_queue.get()  # fixme This is likely what actually kills the thread
+        try:
+            temp = self.out_queue.get(timeout=3)  # fixme This is likely what actually kills the thread
+        except Empty:
+            print("No messages found? fexme")
+            temp = "Nothing"
         self.out_queue.task_done()
         return temp
 
