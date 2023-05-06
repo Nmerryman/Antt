@@ -12,8 +12,8 @@ import math
 
 
 DEBUG = True
-# Options all(default), verification
-TOPICS = {"all", "verification"}
+# Options all(default), verification, mainloop
+TOPICS = {"all", "mainloop"}
 
 
 def log(*text):
@@ -123,6 +123,10 @@ class ConnectionIssue(Exception):
 
 
 class ConnectionNoResponse(ConnectionIssue):
+    pass
+
+
+class SocketIssue(Exception):
     pass
 
 
@@ -338,8 +342,6 @@ class SocketConnection(threading.Thread):
                         self.alive = False
                         self._shutdown_socket()
                         return
-                    elif val == "graceful kill":
-                        self.alive = False
                     self.out_queue.put((val, eval(val)))  # FIXME PROBABLY A MASSIVE SECURITY RISK
                 elif isinstance(val, bytes):
                     self.send_msg(val)
@@ -348,8 +350,9 @@ class SocketConnection(threading.Thread):
                 self.send_heartbeat()
             time.sleep(.1)
 
-        time.sleep(.1)
+        time.sleep(1)
         self._shutdown_socket()
+        time.sleep(1)
 
     def _setup_socket(self):
         """
@@ -499,7 +502,7 @@ class SocketConnection(threading.Thread):
         start = time.time()
         while not self.verified_connection:
             if time.time() - start > timeout:
-                raise ConnectionIssue("Failed to verify in time.")
+                raise TimeoutError("Failed to verify in time.")
             time.sleep(.01)
 
     def block_until_message(self, timeout: int = 1) -> bytes:
@@ -520,6 +523,14 @@ class SocketConnection(threading.Thread):
             print("No messages found? fexme")
             temp = "Nothing"
         return temp
+
+    def block_until_shutdown(self, timeout: int = 1):
+        start = time.time()
+        while not self.in_queue.empty():
+            if time.time() - start > timeout:
+                raise TimeoutError("Failed to shutdown in time")
+            time.sleep(.01)
+        self._shutdown_socket()
 
 
 class MessageType(enum.IntEnum):

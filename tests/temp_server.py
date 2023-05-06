@@ -1,3 +1,5 @@
+import time
+
 import antt.nat_traversal as nt
 from time import sleep
 import antt.data_structures as ds
@@ -6,6 +8,7 @@ import antt.data_structures as ds
 Nat traversal module test
 tries to use the start_connection function to return a working socket connection. Acts as the server and wait before kill.
 """
+
 
 def main():
     src = nt.ConnInfo()
@@ -25,10 +28,12 @@ def main():
     s = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
     s.start()
     s.block_until_verify(3)
-
+    print("Verified server")
     s.in_queue.put(b"Hello")
-    sleep(2)
-    s.in_queue.put("kill")
+
+    s.block_until_shutdown()
+    # print()
+    # sleep(1)
 
 
 if __name__ == '__main__':
