@@ -23,10 +23,10 @@ def main():
     dest.public_port = 3335
     dest.symmetric_range = (2000, 3000)
 
-    # s = nt.start_connection(src, dest)
+    s = nt.start_connection(src, dest)
     ds.DEBUG = True
-    s = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
-    s.start()
+    # s = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+    # s.start()
     s.block_until_verify(3)
     print("Verified server")
     s.in_queue.put(b"Hello")

@@ -14,7 +14,7 @@ class ConnInfo:
         self.can_upnp: bool = False
         self.needs_relay: bool = False
 
-        self.order = ("punch", "upnp", "relay")
+        self.order = ("local", "punch", "upnp", "relay")
 
         # Punch + upnp relevant info
         self.private_ip: str = ""  # probably don't need, but papers recommended it
@@ -26,6 +26,7 @@ class ConnInfo:
         self.relay_session_token = ""
 
         self.punch_type: str = ""
+        # We allow ("cone", "symmetric")
         self.symmetric_range: tuple[int, int] = (0, 0)
 
         self.conn_start_time: int = 0  # set a time to start sending commands to try to connect in case timing matters
@@ -46,6 +47,7 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
         s.settimeout(1)
         s.sendto(b"\x01", (dest.public_ip, dest.public_port))
         try:
+            # We may want to use a blocking_until func instead
             data = s.recv(10)
             if data == b"\x02":
                 s.settimeout(0)
@@ -128,6 +130,11 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
 
                 if count == retry_count:
                     raise ds.ConnectionIssue(f"No response after {retry_count} tries ({retry_count * timeout}s)")
+        elif a == "local":
+            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+            conn.start()
+            return conn
+
 
 
 def symm_shotgun(s: socket.socket, dest: ConnInfo):

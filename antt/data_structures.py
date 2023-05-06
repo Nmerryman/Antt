@@ -286,6 +286,7 @@ class SocketConnection(threading.Thread):
     """
 
     def __init__(self, src_port: int, target: tuple[str, int], in_queue: Queue = None, out_queue: Queue = None):
+        # What if we could inherit a socket if it already exists?
         super().__init__()
         self.daemon = True  # Self terminating
         # Dest info
@@ -408,7 +409,7 @@ class SocketConnection(threading.Thread):
         for a in self.pre_parsed:
             if len(a) == 0:
                 continue
-            elif a == b'\x00' or a == b"\x02" or a == b"\x04":
+            elif a == b'\x00' or a == b"\x02" or a == b"\x04":  # If we care for the acks, we just need to split up this line
                 continue
             elif a == b'\x01':
                 self.socket.sendto(b"\x02", self.target)
