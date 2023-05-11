@@ -101,7 +101,7 @@ class Packet:
             self.storage = json.loads(check)
 
         self.load_storage()
-        log(str(data, "utf-8"))
+        log_txt(str(data, "utf-8"), "Parse packet")
         return self
 
 
