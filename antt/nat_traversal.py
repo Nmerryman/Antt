@@ -249,7 +249,8 @@ class DetectionServer:
         while True:
             try:
                 while True:
-                    data, ip = sa.recvfrom(self.buffer_size)
+                    raw_data, ip = sa.recvfrom(self.buffer_size)
+                    data = ds.Packet().parse(raw_data).type
                     if data in self.port_collection.keys():
                         tmin, tmax, tlasta, tlastb = self.port_collection[data]
                     else:
@@ -269,7 +270,8 @@ class DetectionServer:
 
             try:
                 while True:
-                    data, ip = sb.recvfrom(self.buffer_size)
+                    raw_data, ip = sb.recvfrom(self.buffer_size)
+                    data = ds.Packet().parse(raw_data).type
                     if data in self.port_collection.keys():
                         tmin, tmax, tlasta, tlastb = self.port_collection[data]
                     else:
@@ -289,11 +291,14 @@ class DetectionServer:
 
             try:
                 while True:
-                    data, ip = sr.recvfrom(self.buffer_size)
+                    data, ip = sr.recvfrom(self.buffer_size)  # We assume we are sent packets here
                     packet = ds.Packet().parse(data)
                     if packet.type == "status":
                         if packet.value in self.port_collection.keys():
-                            sr.sendto(self.port_collection[packet.value], ip)
+                            vals = self.port_collection[packet.value]
+                            sr.sendto(ds.Packet(*vals).generate(), ip)
+                        else:
+                            sr.sendto(ds.Packet("not found", packet.value).generate(), ip)
                     elif packet.type == "third":
                         sc.sendto(str(ip).encode(), ip)
                     elif packet.type == "discover":
@@ -302,10 +307,14 @@ class DetectionServer:
             except BlockingIOError:
                 log_txt("DS: BIOE (sr)", "DS socket loop")
                 pass
+            except ConnectionResetError:
+                log_txt("DS: CRE (sr)", "DS socket loop")
+                pass
             except Exception as e:
                 raise e
 
-            sleep(1)
+            # This may still be too high. It causes CRE errors sometimes
+            sleep(.01)
 
 
 
