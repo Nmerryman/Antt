@@ -4,6 +4,7 @@ from time import sleep
 from typing import Union
 import antt.data_structures as ds
 import json
+from antt.cust_logging import *
 
 
 class ConnInfo:
@@ -14,7 +15,7 @@ class ConnInfo:
         self.can_upnp: bool = False
         self.needs_relay: bool = False
 
-        self.order = ("local", "punch", "upnp", "relay")
+        self.order = ("local", "punch cone", "upnp", "punch symmetric", "relay")
 
         # Punch + upnp relevant info
         self.private_ip: str = ""  # probably don't need, but papers recommended it
@@ -36,6 +37,10 @@ class ConnInfo:
 
     def loads(self, data: bytes):
         self.__dict__ = json.loads(data.decode())
+
+    def set_private_ip(self):
+        hostname = socket.gethostname()
+        self.private_ip = socket.gethostbyname(hostname)
 
 
 def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = True) -> ds.SocketConnection:
@@ -65,82 +70,85 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
     retry_count = 6
     timeout = .5
     for a in dest.order:
-        if a == "punch" and dest.can_punch:
-            if dest.punch_type == "cone":
-                s.settimeout(timeout)
-                count = 0
-                sleep(1.5)
-                while count < retry_count:
-                    try:
-                        s.sendto(b"\x01", (dest.public_ip, dest.public_port))
-                        data = s.recv(10)
-                        if data == b"\x02":
-                            s.close()
-                            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
-                            conn.start()
-                            print("got ack")
-                            return conn
-                        elif data == b"\x01":
-                            s.sendto(b"\x02", (dest.public_ip, dest.public_port))
-                            s.close()
-                            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
-                            conn.start()
-                            print("got syn")
-                            return conn
-                    except socket.timeout:
-                        print("inc")
-                        count += 1
-                    except ConnectionResetError:
-                        sleep(timeout)
-                        count += 1
+        if a == "punch symmetric":
+            # Copied from cone and prob wrong
+            s.settimeout(timeout)
+            count = 0
+            sleep(1.5)
+            while count < retry_count:
+                if count % 3 == 0:
+                    symm_shotgun(s, dest)
+                try:
+                    s.sendto(b"\x01", (dest.public_ip, dest.public_port))
+                    data = s.recv(10)
+                    if data == b"\x02":
+                        s.close()
+                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn.start()
+                        print("got ack")
+                        return conn
+                    elif data == b"\x01":
+                        s.sendto(b"\x02", (dest.public_ip, dest.public_port))
+                        s.close()
+                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn.start()
+                        print("got syn")
+                        return conn
+                except TimeoutError:
+                    print("inc")
+                    count += 1
+                except ConnectionResetError:
+                    sleep(timeout)
+                    count += 1
 
-                if count == retry_count:
-                    raise ds.ConnectionIssue(f"No response after {retry_count} tries ({retry_count * timeout}s)")
-            elif dest.punch_type == "symmetric":
+            if count == retry_count:
+                raise ds.ConnectionIssue(f"No response after {retry_count} tries ({retry_count * timeout}s)")
+        elif a == "punch cone":
+            log_txt(f"{src.private_port}: Trying punch cone", "start_conn")
+            s.settimeout(timeout)
+            count = 0
+            sleep(0.5)
+            while count < retry_count:
+                try:
+                    s.sendto(b"\x01", (dest.public_ip, dest.public_port))
+                    log_txt(f"{src.private_port}: sent syn")
+                    data = s.recv(10)
+                    if data == b"\x02":
+                        s.close()
+                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn.start()
+                        log_txt(f"{src.private_port}: got ack", "start_conn")
+                        return conn
+                    elif data == b"\x01":
+                        s.sendto(b"\x02", (dest.public_ip, dest.public_port))
+                        s.close()
+                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn.start()
+                        log_txt(f"{src.private_port}: got syn", "start_conn")
+                        return conn
+                except socket.timeout:
+                    log_txt(f"{src.private_port}: Hit socket.timeout", "start_conn")
+                    sleep(timeout)
+                    count += 1
+                except ConnectionResetError:
+                    log_txt(f"{src.private_port}: Hit ConnectionResetError", "start_conn")
+                    sleep(timeout)
+                    count += 1
 
-                # Copied from cone
-                s.settimeout(timeout)
-                count = 0
-                sleep(1.5)
-                while count < retry_count:
-                    if count % 3 == 0:
-                        symm_shotgun(s, dest)
-                    try:
-                        s.sendto(b"\x01", (dest.public_ip, dest.public_port))
-                        data = s.recv(10)
-                        if data == b"\x02":
-                            s.close()
-                            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
-                            conn.start()
-                            print("got ack")
-                            return conn
-                        elif data == b"\x01":
-                            s.sendto(b"\x02", (dest.public_ip, dest.public_port))
-                            s.close()
-                            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
-                            conn.start()
-                            print("got syn")
-                            return conn
-                    except TimeoutError:
-                        print("inc")
-                        count += 1
-                    except ConnectionResetError:
-                        sleep(timeout)
-                        count += 1
+            if count == retry_count:
+                raise ds.ConnectionIssue(f"No response after {retry_count} tries ({retry_count * timeout}s)")
 
-                if count == retry_count:
-                    raise ds.ConnectionIssue(f"No response after {retry_count} tries ({retry_count * timeout}s)")
         elif a == "local":
-            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+            # We don't have a firewall in the way
+            s.close()
+            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))  # TODO consider using dest private instead
             conn.start()
             return conn
-
 
 
 def symm_shotgun(s: socket.socket, dest: ConnInfo):
     for i in range(dest.symmetric_range[0], dest.symmetric_range[1]):
         s.sendto(b"\x00", (dest.public_ip, i))
-
 
 
 class ClientInfo:
