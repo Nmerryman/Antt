@@ -9,22 +9,9 @@ import psutil
 import threading
 from queue import Queue, Empty
 import math
+from antt.cust_logging import *
 
 
-DEBUG = True
-# Options all(default), verification, mainloop
-TOPICS = {"all", "mainloop"}
-
-
-def log(*text):
-    if DEBUG:
-        print("D:", *text)
-
-
-def log_txt(text, topic="all"):
-    if DEBUG and topic in TOPICS:
-        with open("log.txt", "a") as f:
-            f.write(text)
 
 
 """
