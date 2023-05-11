@@ -214,36 +214,111 @@ class ClientInfo:
         self.device_ip = socket.gethostbyname(socket.gethostname())
 
 
-# class RendezvousServer:
-#
-#     def __init__(self, root_port: int, public: bool = True):
-#         self.root_port = root_port
-#         self.echo_port_a = ds.get_first_port_from(self.root_port + 10)
-#         self.echo_port_b = ds.get_first_port_from(self.root_port + 20)
-#         self.echo_port_c = ds.get_first_port_from(self.root_port + 30)
-#         # noinspection PyTypeChecker
-#         self.pro_a: mp.Process = None
-#         # noinspection PyTypeChecker
-#         self.pro_b: mp.Process = None
-#         self.public = public
-#         self.buffer_size = 100
-#
-#     def launch(self):
-#         self.pro_a = mp.Process(target=echo_server, args=(self.echo_port_a, self.echo_port_c, self.buffer_size))
-#         self.pro_b = mp.Process(target=echo_server, args=(self.echo_port_b, self.echo_port_c, self.buffer_size))
-#         self.pro_a.start()
-#         self.pro_b.start()
-#
-#     def kill(self):
-#         if self.pro_a:
-#             self.pro_a.terminate()
-#         if self.pro_b:
-#             self.pro_b.terminate()
+class DetectionServer:
+
+    def __init__(self, root_port: int):
+        self.root_port = ds.get_first_port_from(root_port)
+        self.echo_port_a = ds.get_first_port_from(self.root_port + 10)
+        self.echo_port_b = ds.get_first_port_from(self.root_port + 20)
+        self.echo_port_c = ds.get_first_port_from(self.root_port + 30)
+        # noinspection PyTypeChecker
+        self.pro_a: mp.Process = None  # Collector
+        # noinspection PyTypeChecker
+        self.pro_b: mp.Process = None  # Alt dest
+        # noinspection PyTypeChecker
+        self.pro_c: mp.Process = None  # New sender
+        self.port_collection = dict()  # {sent name: (min, max, last a (ip, port), last b (ip, port))}
+        self.buffer_size = 100
+
+    def launch(self):
+        # I don't think we should need to worry about too much traffic
+        sr = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sr.bind(("", self.root_port))
+        sr.settimeout(0)
+        sa = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sa.bind(("", self.echo_port_a))
+        sa.settimeout(0)
+        sb = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sb.bind(("", self.echo_port_b))
+        sb.settimeout(0)
+        sc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sc.bind(("", self.echo_port_c))
+        sc.settimeout(0)
+
+        recv_delay = .01
+        while True:
+            try:
+                while True:
+                    data, ip = sa.recvfrom(self.buffer_size)
+                    if data in self.port_collection.keys():
+                        tmin, tmax, tlasta, tlastb = self.port_collection[data]
+                    else:
+                        tmin, tmax, tlasta, tlastb = 99999999, -1, ("", 1), ("", 1)
+                    if ip[1] < tmin:
+                        tmin = ip[1]
+                    if ip[1] > tmax:
+                        tmax = ip[1]
+                    tlasta = ip
+                    self.port_collection[data] = (tmin, tmax, tlasta, tlastb)
+                    sleep(recv_delay)
+            except BlockingIOError:
+                log_txt("DS: BIOE (sa)", "DS socket loop")
+                pass
+            except Exception as e:
+                raise e
+
+            try:
+                while True:
+                    data, ip = sb.recvfrom(self.buffer_size)
+                    if data in self.port_collection.keys():
+                        tmin, tmax, tlasta, tlastb = self.port_collection[data]
+                    else:
+                        tmin, tmax, tlasta, tlastb = 99999999, -1, ("", 1), ("", 1)
+                    if ip[1] < tmin:
+                        tmin = ip[1]
+                    if ip[1] > tmax:
+                        tmax = ip[1]
+                    tlastb = ip
+                    self.port_collection[data] = (tmin, tmax, tlasta, tlastb)
+                    sleep(recv_delay)
+            except BlockingIOError:
+                log_txt("DS: BIOE (sb)", "DS socket loop")
+                pass
+            except Exception as e:
+                raise e
+
+            try:
+                while True:
+                    data, ip = sr.recvfrom(self.buffer_size)
+                    packet = ds.Packet().parse(data)
+                    if packet.type == "status":
+                        if packet.value in self.port_collection.keys():
+                            sr.sendto(self.port_collection[packet.value], ip)
+                    elif packet.type == "third":
+                        sc.sendto(str(ip).encode(), ip)
+                    elif packet.type == "discover":
+                        sr.sendto(ds.Packet(self.echo_port_a, self.echo_port_b, self.echo_port_c).generate(), ip)
+
+            except BlockingIOError:
+                log_txt("DS: BIOE (sr)", "DS socket loop")
+                pass
+            except Exception as e:
+                raise e
+
+            sleep(1)
 
 
-def echo_server(port: int, extra_port: int, buffer_size: int):
+
+    def kill(self):
+        if self.pro_a:
+            self.pro_a.terminate()
+        if self.pro_b:
+            self.pro_b.terminate()
+
+
+def echo_server(s_port: int, root_port: int, ident: str, buffer_size: int):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("", port))
+    s.bind(("", s_port))
     while True:
         data, ip = s.recvfrom(buffer_size)
         if data == b"new source":  # only called when new dest incoming is requested
