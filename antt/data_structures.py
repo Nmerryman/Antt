@@ -40,19 +40,15 @@ class Packet:
         if not extra:
             extra = ''
         self.storage = {"TYPE": data_type, "VALUE": value, "DATA": data, "EXTRA": extra}
-        self.type = data_type
-        self.value = value
-        self.data = data
-        self.extra = extra
     
     def __str__(self):
-        type = self.type
+        dtype = self.type
         value = self.value
         data = self.data
         extra = self.extra
         # crop text when it becomes too long
-        if isinstance(type, str) and len(type) > 100:
-            type = type[:100]
+        if isinstance(dtype, str) and len(dtype) > 100:
+            dtype = dtype[:100]
         if isinstance(value, str) and len(value) > 100:
             value = value[:100]
         if isinstance(data, str) and len(data) > 100:
@@ -60,7 +56,7 @@ class Packet:
         if isinstance(extra, str) and len(extra) > 100:
             extra = extra[:100]
         
-        return f"{type=}, {value=}, {data=}, {extra=}"
+        return f"type={dtype}, {value=}, {data=}, {extra=}"
 
     def __getitem__(self, name: str):
         return self.storage[name.upper()]
@@ -68,39 +64,80 @@ class Packet:
     def __eq__(self, other):
         return self.storage == other.storage
 
-    def load_storage(self):
-        self.type = self.storage["TYPE"]
-        self.value = self.storage["VALUE"]
-        self.data = self.storage["DATA"]
-        self.extra = self.storage["EXTRA"]
+    @property
+    def type(self):
+        return self.storage["TYPE"]
 
-    def set_value(self, value):
-        self.value = value
-        self.storage["VALUE"] = value
+    @type.setter
+    def type(self, val):
+        self.storage["TYPE"] = val
 
-    def set_type(self, data_type):
-        self.type = data_type
-        self.storage["TYPE"] = data_type
+    @property
+    def value(self):
+        return self.storage["VALUE"]
 
-    def set_data(self, data):
-        self.data = data
-        self.storage["DATA"] = data
+    @value.setter
+    def value(self, val):
+        self.storage["VALUE"] = val
 
-    def set_extra(self, extra):
-        self.extra = extra
-        self.storage["EXTRA"] = extra
+    @property
+    def data(self):
+        return self.storage["DATA"]
+
+    @data.setter
+    def data(self, val):
+        self.storage["DATA"] = val
+
+    @property
+    def extra(self):
+        return self.storage["EXTRA"]
+
+    @extra.setter
+    def extra(self, val):
+        self.storage["EXTRA"] = val
 
     def generate(self):
-        return json.dumps(self.storage).encode()
+        temp = self.storage.copy()
+        if isinstance(temp["TYPE"], bytes):
+            temp["TYPE"] = temp["TYPE"].hex()
+            temp["type bytes"] = True
+
+        if isinstance(temp["VALUE"], bytes):
+            temp["VALUE"] = temp["VALUE"].hex()
+            temp["value bytes"] = True
+
+        if isinstance(temp["DATA"], bytes):
+            temp["DATA"] = temp["DATA"].hex()
+            temp["data bytes"] = True
+
+        if isinstance(temp["EXTRA"], bytes):
+            temp["EXTRA"] = temp["EXTRA"].hex()
+            temp["extra bytes"] = True
+
+        return json.dumps(temp).encode()
 
     def parse(self, data):
         check = str(data, "utf-8")
         if check == "":
             self.storage = Packet().storage  # use empty default
         else:
-            self.storage = json.loads(check)
+            self.storage: dict = json.loads(check)
+            if self.storage.get("type bytes", False):
+                self.type = bytes.fromhex(self.type)
+                del self.storage["type bytes"]
 
-        self.load_storage()
+            if self.storage.get("value bytes", False):
+                self.value = bytes.fromhex(self.value)
+                del self.storage["value bytes"]
+
+            if self.storage.get("data bytes", False):
+                self.data = bytes.fromhex(self.data)
+                del self.storage["data bytes"]
+
+            if self.storage.get("extra bytes", False):
+                self.extra = bytes.fromhex(self.extra)
+                del self.storage["extra bytes"]
+
         log_txt(str(data, "utf-8"), "Parse packet")
         return self
 
