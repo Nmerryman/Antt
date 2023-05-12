@@ -303,6 +303,8 @@ class DetectionServer:
                         sc.sendto(str(ip).encode(), ip)
                     elif packet.type == "discover":
                         sr.sendto(ds.Packet(self.echo_port_a, self.echo_port_b, self.echo_port_c).generate(), ip)
+                    elif packet.type == "echo":
+                        sr.sendto(ds.Packet(data).generate(), ip)
 
             except BlockingIOError:
                 log_txt("DS: BIOE (sr)", "DS socket loop")
@@ -315,8 +317,6 @@ class DetectionServer:
 
             # This may still be too high. It causes CRE errors sometimes
             sleep(.01)
-
-
 
     def kill(self):
         if self.pro_a:
