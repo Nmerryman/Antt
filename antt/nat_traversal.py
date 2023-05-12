@@ -1,5 +1,7 @@
+import random
 import socket
 import multiprocessing as mp
+import time
 from time import sleep
 from typing import Union
 import antt.data_structures as ds
@@ -154,18 +156,20 @@ def symm_shotgun(s: socket.socket, dest: ConnInfo):
 class ClientInfo:
     """
     This is for internal information + decision making
-    It currently hold info for all alive connections + stuff
+    It currently hold info/state for all alive connections + stuff
     Probably wont be used at the end
     """
     def __init__(self):
-        self.type = ""
         self.reachable: bool = False
-        self.upnp_avail: bool = False
+        self.type = ""
         self.public_ip = ""
         self.device_ip = ""
         self.punched_ports = []
+        self.upnp_avail: bool = False
         self.upnp_ports = []
-        self.buffer_size = 100
+        self.buffer_size = 200
+        self.symm_test_count = 100
+        self.start_port = 4554
 
     def dumps(self):
         return json.dumps(self.__dict__).encode()
@@ -173,44 +177,61 @@ class ClientInfo:
     def loads(self, data: bytes):
         self.__dict__ = json.loads(data.decode())
 
-    def detect_nat_type(self, target_a: tuple[str, int], target_b: tuple[str, int]):
+    def detect_nat_type(self, discover_server: tuple[str, int]):
         """
         This assumes my rendezvous implementation/responses
         """
         # Create socket
-        s_a = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s_a.settimeout(1)
+        start_port = ds.get_first_port_from(4441)
+        name = str(random.randint(1, 999999))
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(("", start_port))
+        s.settimeout(5)
 
-        # Send probes
-        s_a.sendto(b"aa", target_a)
-        s_a.sendto(b"ab", target_b)
-
-        responses = [s_a.recv(self.buffer_size), s_a.recv(self.buffer_size)]
-        interp = {}
-        for a in responses:
-            temp = a.decode().split(" ")
-            interp[temp[2]] = (temp[0], int(temp[1]))
-
-        s_a.sendto(b"new source", target_a)
-        temp = None
         try:
-            temp = s_a.recv(self.buffer_size).decode().split(" ")
-        except socket.timeout:
-            print("other failed")
+            s.sendto(ds.Packet("discover").generate(), discover_server)
 
-        if temp:
-            interp["ao"] = (temp[0], int(temp[1]))
+            data = ds.Packet().parse(s.recv(self.buffer_size))
+            sa = data.type
+            sb = data.value
+            sc = data.data
+        except ConnectionResetError as e:
+            log_txt("Discover didn't respond in time", "client detect nat")
+            raise e
 
-        if interp["aa"][1] == interp["ab"][1]:
-            self.type = "normal"
+        for a in range(self.symm_test_count):
+            symm_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            temp_port = ds.get_first_port_from(self.start_port + a)
+            symm_socket.bind(("", temp_port))
+            symm_socket.sendto(ds.Packet(name).generate(), (discover_server[0], sa))
+
+        final_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        final_socket.bind(("", ds.get_first_port_from(self.start_port + self.symm_test_count + 200)))
+        final_socket.sendto(ds.Packet(name).generate(), (discover_server[0], sa))
+        final_socket.sendto(ds.Packet(name).generate(), (discover_server[0], sb))
+
+        try:
+            s.sendto(ds.Packet("status", name).generate(), discover_server)
+            start_time = time.time()
+            status = ds.Packet().parse(s.recv(self.buffer_size))
+            print(time.time() - start_time, status)
+        except Exception as e:
+            log_txt("Failed to return status request", "client detect nat")
+            raise e
+        if status.data[1] == status.extra[1]:
+            # Different destinations (ports) show the same source
+            self.type = "cone"
+            s.sendto(ds.Packet("third").generate(), discover_server)
+            try:
+                response = s.recv(self.buffer_size)
+                self.reachable = True
+            except Exception as e:
+                log_txt("No response from third", "client detect nat")
+                raise e
         else:
             self.type = "symmetric"
 
-        if "ao" in interp:
-            self.reachable = True
-
-        # Log some additional info
-        self.public_ip = interp["aa"][0]
+        self.public_ip = status.data[0]
         self.device_ip = socket.gethostbyname(socket.gethostname())
 
 
