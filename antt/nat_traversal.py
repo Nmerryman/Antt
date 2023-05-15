@@ -13,19 +13,28 @@ class ConnInfo:
 
     def __init__(self):
         # What methods can we use for reachability
-        self.can_punch: bool = False
+        self.can_udp: bool = True
         self.can_upnp: bool = False
+        self.prioritize_upnp_tcp: bool = True
         self.needs_relay: bool = False
 
-        self.order = ("local", "punch cone", "upnp", "punch symmetric", "relay")
+        self.order = ["local", "upnp connect", "punch cone", "upnp open", "punch symmetric", "relay"]
+        self.timings = {"local": 3, "upnp connect": 5, "punch cone": 10, "upnp open": 15, "punch symmetric": 15, "relay": 10}  # Time given for each strategy before trying next one
 
         # Punch + upnp relevant info
+        # Matters more for local connection
         self.private_ip: str = ""  # probably don't need, but papers recommended it
         self.private_port: int = 0   # probably don't need, but papers recommended it
 
+        # Matters more for punching
         self.public_ip: str = ""
         self.public_port: int = 0
 
+        self.upnp_port_start = 5554
+        self.upnp_backup_count = 3
+        self.upnp_backup_offsets = 101
+
+        # Relay is intended to be tcp
         self.relay_session_token = ""
 
         self.punch_type: str = ""
@@ -33,6 +42,7 @@ class ConnInfo:
         self.symmetric_range: tuple[int, int] = (0, 0)
 
         self.conn_start_time: int = 0  # set a time to start sending commands to try to connect in case timing matters
+        self.id = random.randint(1, 99999999)
 
     def dumps(self):
         return json.dumps(self.__dict__).encode()
@@ -165,10 +175,11 @@ class ClientInfo:
         self.public_ip = ""
         self.device_ip = ""
         self.punched_ports = []
+        self.symm_test_range = (0, 0)
         self.upnp_avail: bool = False
         self.upnp_ports = []
         self.buffer_size = 200
-        self.symm_test_count = 100
+        self.symm_test_count = 50
         self.start_port = 4554
 
     def dumps(self):
@@ -231,8 +242,12 @@ class ClientInfo:
         else:
             self.type = "symmetric"
 
+        self.symm_test_range = (status.type, status.value)
         self.public_ip = status.data[0]
         self.device_ip = socket.gethostbyname(socket.gethostname())
+
+    def gen_conn_info(self):
+        base = ConnInfo()
 
 
 class DetectionServer:
