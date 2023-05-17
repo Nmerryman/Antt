@@ -5,6 +5,8 @@ import json
 import enum
 import socket
 import time
+import traceback
+
 import psutil
 import threading
 from queue import Queue, Empty
@@ -557,6 +559,210 @@ class SocketConnectionUDP(threading.Thread):
                 raise TimeoutError("Failed to shutdown in time")
             time.sleep(.01)
         self._shutdown_socket()
+
+
+class SocketConnectionTCP(threading.Thread):
+    """
+    You are _looking at_ the thread. You are putting into and taking out of the thread/socket itself
+    I guess this has kinda evolved to try to do tcp things
+    """
+
+    def __init__(self, src_port: int, target: tuple[str, int], in_queue: Queue = None, out_queue: Queue = None, acts_as: str = "client"):
+        log_txt(f"{src_port}: start init", "tcp socket setup")
+        # What if we could inherit a socket if it already exists?
+        super().__init__()
+        self.daemon = True  # Self terminating
+        # Dest info
+        self.src_port = src_port
+        self.target = target
+        self.acts_as = acts_as
+        # Init queue objects if needed
+        if in_queue:
+            self.in_queue = in_queue
+        else:
+            self.in_queue = Queue()
+        if out_queue:
+            self.out_queue = out_queue
+        else:
+            self.out_queue = Queue()
+
+        self.last_action = 0
+        self.max_no_action_delay = 20
+        # noinspection PyTypeChecker
+        self.socket: socket.socket = None
+
+        self.alive = False
+        self.verified_connection = False
+        self.buffer_size = 1024
+        self.pre_parsed = b""
+        log_txt(f"{src_port}: end init", "tcp socket setup")
+
+    def run(self) -> None:
+
+        self._setup_socket()
+        self.last_action = time.time()
+        log_txt(f"{self.src_port}: setup done", "tcp socket run")
+        while self.alive:
+            log_txt(f"{self.src_port}: storing", "tcp socket run")
+            self.store_incoming()
+
+            log_txt(f"{self.src_port}: merging messages", "tcp socket run")
+            for a in self.pop_finished_messages():
+                self.out_queue.put(a)
+
+            log_txt(f"{self.src_port}: parsing inputs", "tcp socket run")
+            while not self.in_queue.empty():
+                val = self.in_queue.get()
+                self.in_queue.task_done()
+
+                if isinstance(val, str):
+                    if val == "kill":
+                        log_txt(f"{self.src_port}: starting kill", "tcp socket run")
+                        self.alive = False
+                        self._shutdown_socket()
+                elif isinstance(val, bytes):
+                    self.send_msg(val)
+
+            if time.time() > self.last_action + self.max_no_action_delay:
+                self.send_heartbeat()
+
+            time.sleep(.01)
+
+        time.sleep(.1)
+        self._shutdown_socket()
+
+    def _setup_socket(self):
+        log_txt(f"{self.src_port}: setup", "tcp socket setup")
+        self.alive = True
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.bind(("", self.src_port))
+        if self.acts_as == "client":
+            log_txt(f"{self.src_port}: as client", "tcp socket setup")
+            count = 0
+            tries = 100
+            try_timout = 2
+            try_delay = try_timout / tries
+            while count < tries:
+                try:
+                    self.socket.connect(self.target)
+                    break
+                except ConnectionResetError:
+                    count += 1
+                    time.sleep(try_delay)
+            self.socket.sendall(b"\x01")
+            log_txt(f"{self.src_port}: awaiting response", "tcp socket setup")
+            data = self.socket.recv(self.buffer_size)
+            if data != b"\x02":
+                log_txt(f"{self.src_port}: received incorrect data", "tcp socket setup")
+                raise ConnectionIssue("Unable to verify server is correct class")
+        else:  # May want to be more precise
+            log_txt(f"{self.src_port}: as server", "tcp socket setup")
+            self.socket.listen()
+            self.socket = self.socket.accept()[0]
+            log_txt(f"{self.src_port}: accepted client")
+            data = self.socket.recv(self.buffer_size)
+            if data != b"\x01":
+                raise ConnectionIssue("Unable to verify client is correct class")
+            log_txt(f"{self.src_port}: sending response")
+            self.socket.sendall(b"\x02")
+
+        log_txt(f"{self.src_port}: Verification done")
+        self.socket.settimeout(0.0)
+        self.verified_connection = True
+
+    def _shutdown_socket(self):
+        self.socket.close()
+        self.alive = False
+
+    def send_msg(self, val: bytes):
+        log_txt(f"{self.src_port}: sending message")
+        self.socket.setblocking(True)
+        self.socket.sendall(len(val).to_bytes(5, "big"))
+        self.socket.sendall(val)
+        self.socket.settimeout(0)
+        self.last_action = time.time()
+
+    def send_heartbeat(self):
+        self.socket.send(b"\x00")
+        self.last_action = time.time()
+
+    def store_incoming(self):
+        try:
+            while True:
+                current = len(self.pre_parsed)
+                self.pre_parsed += self.socket.recv(self.buffer_size)
+                log_txt(f"{self.src_port}: saved packet -> {self.pre_parsed}")
+                if len(self.pre_parsed) == current:
+                    break
+        except socket.timeout:
+            pass
+        except BlockingIOError:
+            pass
+        except ConnectionResetError:
+            pass
+            # self.alive = False  # maybe?
+        except Exception as e:
+            log_txt(f"{self.src_port}: {e}")
+            raise e
+
+    def pop_finished_messages(self):
+
+        messages = []
+
+        while True:
+            if len(self.pre_parsed) < 6:
+                log_txt(f"{self.src_port}: 1popping {messages}", "tcp socket pop")
+                return messages
+            current_len = int.from_bytes(self.pre_parsed[0:5], "big")
+            if len(self.pre_parsed) - 5 < current_len:
+                log_txt(f"{self.src_port}: 2popping {messages}", "tcp socket pop")
+                return messages
+
+            messages.append(self.pre_parsed[5:5 + current_len])
+            self.pre_parsed = self.pre_parsed[5 + current_len:]
+
+    def block_until_message(self, timeout: int = 1) -> bytes:
+        sleep_len = .1
+        count = 0
+        try:
+            while self.out_queue.empty() and count < timeout / sleep_len:
+                time.sleep(sleep_len)
+                count += 1
+            if count == int(timeout / sleep_len):
+                log_txt(f"{self.src_port}: block until timed out; queue always empty")
+                raise KeyboardInterrupt  # There's probably a better way to do this
+        except KeyboardInterrupt:
+            self.in_queue.put("kill")
+        try:
+            temp = self.out_queue.get(timeout=3)  # fixme This is likely what actually kills the thread
+            self.out_queue.task_done()
+        except Empty:
+            print("No messages found? fexme")
+            temp = "Nothing"
+        return temp
+
+    def block_until_verify(self, timeout: int = 1):
+        start = time.time()
+        while not self.verified_connection:
+            if time.time() - start > timeout:
+                raise TimeoutError("Failed to verify in time.")
+            time.sleep(.01)
+
+    def block_until_shutdown(self, timeout: int = 1):
+        start = time.time()
+        while not self.in_queue.empty():
+            self.send_msg(self.in_queue.get())
+            self.in_queue.task_done()
+            if time.time() - start > timeout:
+                raise TimeoutError("Failed to shutdown in time")
+            # time.sleep(.01)
+        self._shutdown_socket()
+
+
+def exception_log(args):
+    log_txt(f"{args}")
+    log_txt(f"{traceback.format_tb(args.exc_traceback)}")
+threading.excepthook = exception_log
 
 
 class MessageType(enum.IntEnum):
