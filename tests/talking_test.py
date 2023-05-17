@@ -22,7 +22,7 @@ def main():
     target_port = int(sys.argv[2])
 
     send, recv = Queue(), Queue()
-    s = ds.SocketConnection(src_port, ("127.0.0.1", target_port), send, recv).set_buffer_size(20)
+    s = ds.SocketConnectionUDP(src_port, ("127.0.0.1", target_port), send, recv).set_buffer_size(20)
     s.start()
     t = Thread(target=print_incoming, args=(recv,))
     t.start()

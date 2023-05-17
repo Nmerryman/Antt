@@ -27,7 +27,7 @@ def test_basic_socket_life():
     """
     Test if we can start and stop these connections through internal means
     """
-    conn = ds.SocketConnection(ds.get_first_port_from(10000), ("", 2222))
+    conn = ds.SocketConnectionUDP(ds.get_first_port_from(10000), ("", 2222))
     conn.verified_connection = True
     conn.start()
     conn.in_queue.put("kill")
@@ -42,14 +42,14 @@ def test_basic_socket_life():
 
 
 @pytest.mark.filterwarnings
-def test_basic_socket_send():
+def test_basic_udp_socket_send():
     """
     Send a basic message from one comm to the other
     """
     port_sender = ds.get_first_port_from(2222)
     port_receiver = ds.get_first_port_from(3333)
-    sender = ds.SocketConnection(port_sender, ("127.0.0.1", port_receiver))
-    receiver = ds.SocketConnection(port_receiver, ("127.0.0.1", port_sender))
+    sender = ds.SocketConnectionUDP(port_sender, ("127.0.0.1", port_receiver))
+    receiver = ds.SocketConnectionUDP(port_receiver, ("127.0.0.1", port_sender))
 
     sender.start()
     receiver.start()

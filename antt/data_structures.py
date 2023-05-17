@@ -304,7 +304,7 @@ class FrameGenerator:
         return out
 
 
-class SocketConnection(threading.Thread):
+class SocketConnectionUDP(threading.Thread):
     """
     You are _looking at_ the thread. You are putting into and taking out of the thread/socket itself
     I guess this has kinda evolved to try to do tcp things

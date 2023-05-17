@@ -55,7 +55,7 @@ class ConnInfo:
         self.private_ip = socket.gethostbyname(hostname)
 
 
-def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = True) -> ds.SocketConnection:
+def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = True) -> ds.SocketConnectionUDP:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind((src.private_ip, src.private_port))
 
@@ -69,7 +69,7 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
             if data == b"\x02":
                 s.settimeout(0)
                 s.close()
-                conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                conn = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))
                 conn.start()
                 return conn
         except socket.timeout:
@@ -95,14 +95,14 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
                     data = s.recv(10)
                     if data == b"\x02":
                         s.close()
-                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))
                         conn.start()
                         print("got ack")
                         return conn
                     elif data == b"\x01":
                         s.sendto(b"\x02", (dest.public_ip, dest.public_port))
                         s.close()
-                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))
                         conn.start()
                         print("got syn")
                         return conn
@@ -127,14 +127,14 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
                     data = s.recv(10)
                     if data == b"\x02":
                         s.close()
-                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))
                         conn.start()
                         log_txt(f"{src.private_port}: got ack", "start_conn")
                         return conn
                     elif data == b"\x01":
                         s.sendto(b"\x02", (dest.public_ip, dest.public_port))
                         s.close()
-                        conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+                        conn = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))
                         conn.start()
                         log_txt(f"{src.private_port}: got syn", "start_conn")
                         return conn
@@ -153,7 +153,7 @@ def start_connection(src: ConnInfo, dest: ConnInfo, test_for_existing: bool = Tr
         elif a == "local":
             # We don't have a firewall in the way
             s.close()
-            conn = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))  # TODO consider using dest private instead
+            conn = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))  # TODO consider using dest private instead
             conn.start()
             return conn
 

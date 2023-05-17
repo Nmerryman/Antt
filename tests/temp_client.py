@@ -25,7 +25,7 @@ def main():
 
     s = nt.start_connection(src, dest, test_for_existing=False)
     ds.DEBUG = True
-    # s = ds.SocketConnection(src.private_port, (dest.public_ip, dest.public_port))
+    # s = ds.SocketConnectionUDP(src.private_port, (dest.public_ip, dest.public_port))
     # s.start()
     s.block_until_verify(3)
     print("Verified client")
