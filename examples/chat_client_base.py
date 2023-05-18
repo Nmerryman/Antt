@@ -17,7 +17,8 @@ def start_client(local_port: int, dest: tuple[str, int], acts_as: str):
     client.on_message = partial(print_text, client)
 
     client.start()
-    client.block_until_verify()
+
+    client.block_until_verify(3)
 
     while client.alive and client.verified_connection:
         text = input(">")

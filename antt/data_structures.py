@@ -338,6 +338,10 @@ class SocketConnectionUDP(threading.Thread):
 
         self.alive = False
         self.verified_connection = False
+
+        self.connect_try_limit = 100
+        self.connect_try_timeout = 2
+
         self.buffer_size = 1024
         self.pre_parsed = []
         self.building_blocks = {}
@@ -395,9 +399,9 @@ class SocketConnectionUDP(threading.Thread):
         """
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("", self.src_port))
-        timeout_len = .1
-        time_limit = 2
-        limit = int(time_limit / timeout_len)
+        time_limit = self.connect_try_timeout
+        limit = self.connect_try_limit
+        timeout_len = time_limit / limit
         count = 0
         self.socket.settimeout(timeout_len)
         log_txt(f"Setting up {self.src_port}\n", "verification")
@@ -532,9 +536,10 @@ class SocketConnectionUDP(threading.Thread):
         self.frame_generator.buffer_size = size
         return self
 
-    def block_until_verify(self, timeout: int = 1):
+    def block_until_verify(self, timeout: int = 2):
         start = time.time()
         while not self.verified_connection:
+            # Maybe change timeout to be based on self.connect_try_timeout
             if time.time() - start > timeout:
                 raise TimeoutError("Failed to verify in time.")
             time.sleep(.01)
@@ -602,6 +607,9 @@ class SocketConnectionTCP(threading.Thread):
         self.verified_connection = False
         self.buffer_size = 1024
         self.pre_parsed = b""
+
+        self.connect_try_limit = 100
+        self.connect_try_timeout = 2
         log_txt(f"{src_port}: end init", "tcp socket setup")
 
     def run(self) -> None:
@@ -652,9 +660,9 @@ class SocketConnectionTCP(threading.Thread):
         if self.acts_as == "client":
             log_txt(f"{self.src_port}: as client", "tcp socket setup")
             count = 0
-            tries = 100
-            try_timout = 2
-            try_delay = try_timout / tries
+            tries = self.connect_try_limit
+            try_timeout = self.connect_try_timeout
+            try_delay = try_timeout / tries
             while count < tries:
                 try:
                     self.socket.connect(self.target)
@@ -754,9 +762,10 @@ class SocketConnectionTCP(threading.Thread):
             temp = "Nothing"
         return temp
 
-    def block_until_verify(self, timeout: int = 1):
+    def block_until_verify(self, timeout: int = 2):
         start = time.time()
         while not self.verified_connection:
+            # Maybe change timeout value to be based on self.connect_try_timeout
             if time.time() - start > timeout:
                 raise TimeoutError("Failed to verify in time.")
             time.sleep(.01)
