@@ -409,35 +409,37 @@ class SocketConnectionUDP(threading.Thread):
             try:
                 data = self.socket.recv(self.buffer_size)
                 if data == b"\x04":
-                    log_txt(f"{self.src_port}: verify confirmed -> marking\n", "verification")
+                    log_txt(f"{self.src_port}: verify confirmed -> marking", "verification")
                     self.verified_connection = True
                 elif data == b"\x03":
-                    log_txt(f"{self.src_port}: verify requested -> responding\n", "verification")
+                    log_txt(f"{self.src_port}: verify requested -> responding", "verification")
                     self.socket.sendto(b"\x04", self.target)
                     self.verified_connection = True
                 else:
-                    log_txt(f"{self.src_port}: recv {data} instead\n", "verification")
+                    log_txt(f"{self.src_port}: recv {data} instead", "verification")
             except TimeoutError:
-                log_txt(f"{self.src_port}: con_error 1; send request\n", "verification")
+                log_txt(f"{self.src_port}: con_error 1; send request", "verification")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
             except socket.timeout:
-                log_txt(f"{self.src_port}: con_error 2; send request\n", "verification")
+                log_txt(f"{self.src_port}: con_error 2; send request", "verification")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
             except ConnectionResetError:
-                log_txt(f"{self.src_port}: con_error 3; send request\n", "verification")
+                log_txt(f"{self.src_port}: con_error 3; send request", "verification")
                 self.socket.sendto(b"\x03", self.target)
                 count += 1
             time.sleep(timeout_len)
 
         if count == limit:
-            log_txt(f"{self.src_port}: Giving up verification\n", "verification")
+            log_txt(f"{self.src_port}: Giving up verification", "verification")
             raise ConnectionNoResponse("Failed to verify socket on other side")
 
+        log_txt(f"{self.src_port}: almost done with verification", "verification")
         self.socket.settimeout(0)
         self.socket.setblocking(False)
         self.alive = True
+        log_txt(f"{self.src_port}: Done with verification", "verification")
 
     def _shutdown_socket(self):
         self.socket.close()
