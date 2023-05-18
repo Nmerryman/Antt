@@ -764,8 +764,9 @@ class SocketConnectionTCP(threading.Thread):
     def block_until_shutdown(self, timeout: int = 1):
         start = time.time()
         while not self.in_queue.empty():
-            self.send_msg(self.in_queue.get())
-            self.in_queue.task_done()
+            # Not sure if clearing the queue in multiple threads can cause race conditions so we'll not abstract it, and just let main thread work on it
+            # self.send_msg(self.in_queue.get())
+            # self.in_queue.task_done()
             if time.time() - start > timeout:
                 raise TimeoutError("Failed to shutdown in time")
             # time.sleep(.01)
