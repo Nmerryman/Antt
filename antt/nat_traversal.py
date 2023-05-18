@@ -19,6 +19,7 @@ class ConnInfo:
         self.needs_relay: bool = False
 
         self.order = ["local", "upnp connect", "punch cone", "upnp open", "punch symmetric", "relay"]
+        self.mode_sock_type = {"local": "tcp", "upnp connect": "tcp", "upnp open": "tcp", "punch cone": "udp", "punch symmetric": "udp", "relay": "tcp"}
         self.timings = {"local": 3, "upnp connect": 5, "punch cone": 10, "upnp open": 15, "punch symmetric": 15, "relay": 10}  # Time given for each strategy before trying next one
 
         # Punch + upnp relevant info

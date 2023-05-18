@@ -6,6 +6,20 @@ from time import sleep
 assert_timeout = 2
 assert_delay = .01
 assert_limit = int(assert_timeout / assert_delay)
+global_test_val = None
+global_test_bool = False
+
+
+def global_true(*args):
+    global global_test_val, global_test_bool
+    global_test_bool = True
+    global_test_val = args
+
+
+def global_false(*args):
+    global global_test_val, global_test_bool
+    global_test_bool = False
+    global_test_val = args
 
 
 def test_packet_conversions():
@@ -127,6 +141,8 @@ def test_basic_tcp_socket_send2():
     sender = ds.SocketConnectionTCP(sender_port, ("127.0.0.1", receiver_port))
     receiver = ds.SocketConnectionTCP(receiver_port, ("127.0.0.1", sender_port), acts_as="server")
 
+    receiver.on_message = global_true  # Test the callback function
+
     sender.start()
     receiver.start()
 
@@ -137,7 +153,11 @@ def test_basic_tcp_socket_send2():
 
     sender.in_queue.put(b"test text")
 
-    message = receiver.block_until_message()
+    count = 0
+    while not global_test_bool and count < assert_limit:
+        sleep(assert_delay)
+        count += 1
+    assert count < assert_limit
 
     # Make sure we shut down
     receiver.in_queue.put(b"waiting for shutdown")
@@ -146,6 +166,8 @@ def test_basic_tcp_socket_send2():
 
     assert not sender.alive and not receiver.alive
 
-    assert message == b"test text"
+    assert global_test_val[0] == b"test text"
+    assert global_test_bool
+
 
 # test_basic_tcp_socket_send2()

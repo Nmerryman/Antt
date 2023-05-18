@@ -334,6 +334,7 @@ class SocketConnectionUDP(threading.Thread):
         self.max_unrequited_love = 3  # We may not care to check if incoming doesn't happen
         # noinspection PyTypeChecker
         self.socket: socket.socket = None
+        self.on_message = None  # pass message to callback if set
 
         self.alive = False
         self.verified_connection = False
@@ -373,6 +374,11 @@ class SocketConnectionUDP(threading.Thread):
                     self.out_queue.put((val, eval(val)))  # FIXME PROBABLY A MASSIVE SECURITY RISK
                 elif isinstance(val, bytes):
                     self.send_msg(val)
+
+            while self.on_message and not self.out_queue.empty():
+                self.on_message(self.out_queue.get())
+                self.out_queue.task_done()
+
             # Check if we need to send a heartbeat
             if time.time() > self.last_action + self.max_no_action_delay:
                 self.send_heartbeat()
@@ -590,6 +596,7 @@ class SocketConnectionTCP(threading.Thread):
         self.max_no_action_delay = 20
         # noinspection PyTypeChecker
         self.socket: socket.socket = None
+        self.on_message = None  # out_queue message callback
 
         self.alive = False
         self.verified_connection = False
@@ -622,6 +629,12 @@ class SocketConnectionTCP(threading.Thread):
                         self._shutdown_socket()
                 elif isinstance(val, bytes):
                     self.send_msg(val)
+
+            while self.on_message and not self.out_queue.empty():
+                log_txt(f"{self.src_port}: callback start", "tcp socket run")
+                self.on_message(self.out_queue.get())
+                self.out_queue.task_done()
+                log_txt(f"{self.src_port}: callback done", "tcp socket run")
 
             if time.time() > self.last_action + self.max_no_action_delay:
                 self.send_heartbeat()
