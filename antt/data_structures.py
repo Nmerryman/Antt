@@ -691,7 +691,7 @@ class SocketConnectionTCP(threading.Thread):
             while True:
                 current = len(self.pre_parsed)
                 self.pre_parsed += self.socket.recv(self.buffer_size)
-                log_txt(f"{self.src_port}: saved packet -> {self.pre_parsed}")
+                log_txt(f"{self.src_port}: saved packet -> {self.pre_parsed}", "tcp socket store")
                 if len(self.pre_parsed) == current:
                     break
         except socket.timeout:

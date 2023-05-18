@@ -1,8 +1,8 @@
 
 
 DEBUG = True
-# Options all(default), verification, mainloop, start_conn, DS socket loop, "tcp socket
-TOPICS = {"all", "start_conn", "tcp socket setup"}
+# Options all(default), verification, mainloop, start_conn, DS socket loop, tcp socket setup
+TOPICS = {"all", "start_conn", "tcp socket run"}
 
 
 def log(*text):
