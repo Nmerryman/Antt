@@ -540,7 +540,7 @@ class SocketConnectionUDP(threading.Thread):
 
     def block_until_verify(self, timeout: int = 2):
         start = time.time()
-        while not self.verified_connection:
+        while not self.alive or not self.verified_connection:  # It should be fair to wait until alive
             # Maybe change timeout to be based on self.connect_try_timeout
             if time.time() - start > timeout:
                 raise TimeoutError("Failed to verify in time.")
@@ -766,7 +766,7 @@ class SocketConnectionTCP(threading.Thread):
 
     def block_until_verify(self, timeout: int = 2):
         start = time.time()
-        while not self.verified_connection:
+        while not self.alive or not self.verified_connection:  # It should be fair to assume we're alive too
             # Maybe change timeout value to be based on self.connect_try_timeout
             if time.time() - start > timeout:
                 raise TimeoutError("Failed to verify in time.")
