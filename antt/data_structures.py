@@ -3,6 +3,7 @@ This file contains data structures and additional helpers needed for network com
 """
 import json
 import enum
+import random
 import socket
 import time
 import traceback
@@ -25,6 +26,9 @@ Just for some packet notation:
 0x04 = conn only ack
 0x05 = small + single packet message (currently acts like \x06 and is wrapped as a multi-packet)
 0x06 = multi-packet message
+0x07 = resend packet
+0x08 = done sending message
+0x09 = message fully built
 """
 
 
@@ -232,6 +236,7 @@ class Frame:
 
     @staticmethod
     def _remove_heartbeats(data: bytes):
+        # This should remove any leading heartbeats
         # I think this can be removed
         index = 0
         while len(data) > index and data[index] == 0:  # 0 because I guess \x00 is not the same
@@ -259,7 +264,7 @@ class FrameGenerator:
     """
     def __init__(self, buffer_size: int):
         self.buffer_size = buffer_size
-        self.message_space = self.buffer_size - 11
+        self.message_space = self.buffer_size - 11  # We probably don't want to hard code the 11
         self.id_len = 3
         self.msg_part_len = 3
         self.ids_in_use = set()
@@ -271,12 +276,14 @@ class FrameGenerator:
         Generate a new id value.
         This should (but dosesn't rn) wrap and remove old values
         """
+        new_id = random.randint(0, 9999)
+
         new_id = self.latest_id + 1
         while new_id in self.ids_in_use:
             self.latest_id = new_id
             new_id = self.latest_id + 1
         self.latest_id = new_id
-        
+
         return new_id
 
     def prep(self, obj: bytes, m_type: bytes = b'\x05') -> list[bytes]:
@@ -342,7 +349,13 @@ class SocketConnectionUDP(threading.Thread):
         self.connect_try_limit = 100
         self.connect_try_timeout = 2
 
+        self.debug = []  # NEED TO REMOVE LATER
+
         self.buffer_size = 1024
+        self.dest_socket_buffer_size = 40_000  # I think this should be a fair size
+        self.dest_socket_buffer_filled = 0
+        self.send_buffer = Queue()
+        self.awaiting_space = False
         self.pre_parsed = []
         self.building_blocks = {}
         self.send_memory = {}
@@ -361,6 +374,23 @@ class SocketConnectionUDP(threading.Thread):
 
             # Parse all available frames in the partial
             self.distribute_stored()
+
+            # Send anything that is ready in the send buffer given there is space in dest buffer
+            while not self.send_buffer.empty() and "send_buffer" not in self.debug:
+                val = self.send_buffer.get()
+                if len(val) + self.dest_socket_buffer_filled < self.dest_socket_buffer_size:
+                    log_txt(f"{self.src_port}: sending {val}")
+                    self.send_bytes(val)
+                    self.dest_socket_buffer_filled += len(val)
+                    # self.debug.append("send_buffer")
+                    # self.debug.append(val)
+                    self.send_buffer.task_done()
+                else:
+                    if not self.awaiting_space:
+                        log_txt(f"{self.src_port}: sending awaiting space")
+                        self.send_bytes(b'\x01')
+                        self.awaiting_space = True
+                    break
 
             # Send out any read messages
             for a in self.pop_finished_messages():
@@ -386,7 +416,7 @@ class SocketConnectionUDP(threading.Thread):
             # Check if we need to send a heartbeat
             if time.time() > self.last_action + self.max_no_action_delay:
                 self.send_heartbeat()
-            time.sleep(.1)
+            # time.sleep(.1)
 
         time.sleep(1)
         self._shutdown_socket()
@@ -448,8 +478,13 @@ class SocketConnectionUDP(threading.Thread):
         for a in self.pre_parsed:
             if len(a) == 0:
                 continue
-            elif a == b'\x00' or a == b"\x02" or a == b"\x04":  # If we care for the acks, we just need to split up this line
-                continue
+            elif a == b'\x00':
+                # This message also means the buffer is empty
+                # self.dest_socket_buffer_filled = 0
+                pass
+            elif a == b"\x02" or a == b"\x04":  # If we care for the acks, we just need to split up this line
+                self.dest_socket_buffer_filled = 0
+                self.awaiting_space = False
             elif a == b'\x01':
                 self.socket.sendto(b"\x02", self.target)
             elif a == b'\x03':
@@ -471,7 +506,7 @@ class SocketConnectionUDP(threading.Thread):
         """
         prep = self.frame_generator.prep(data)
         for a in prep:
-            self.send_bytes(a)
+            self.send_buffer.put(a)
 
     def send_heartbeat(self):
         key = b"\x00"  # first byte = 0 means heartbeat
@@ -491,12 +526,18 @@ class SocketConnectionUDP(threading.Thread):
         """
         first = True
         current = 0
+        # log_txt(f"{self.src_port}: storing any incomming", "udp store")
+        start_len = len(self.pre_parsed)
         while len(self.pre_parsed) > current or first:
             first = False
             try:
                 current = len(self.pre_parsed)
                 self.pre_parsed.append(self.socket.recv(self.buffer_size))  # I probably need to try for exceptions here; I forgot how non-blocking works
-
+                if len(self.pre_parsed) < 10:
+                    # Keep the logging reasonable
+                    log_txt(f"{self.src_port}: preparsed -> {self.pre_parsed}", "udp store")
+                else:
+                    log_txt(f"{self.src_port}: parsed extended (too long already)", "udp store")
             except BlockingIOError:
                 pass
             except ConnectionResetError:
@@ -504,6 +545,8 @@ class SocketConnectionUDP(threading.Thread):
                 # print("connection reset error")
                 # self.alive = False
                 pass
+        if len(self.pre_parsed) != start_len and not (len(self.pre_parsed) == 1 and self.pre_parsed[0] == b"\x00"):
+            self.send_heartbeat()
 
     def incoming_organizer(self, frame: Frame):
         """
@@ -523,12 +566,13 @@ class SocketConnectionUDP(threading.Thread):
     def pop_finished_messages(self):
         out = []
         for k, v in list(self.building_blocks.items()):
-            if v['meta']['done']:
+            if v['meta']['done'] and k not in self.debug:
                 buffer = b''
                 for a in range(0, v['meta']['len']):
                     buffer += v[a].data
                 out.append(buffer)
-                del self.building_blocks[k]
+                # del self.building_blocks[k]
+                self.debug.append(k)
 
         # print(out)
         return out
