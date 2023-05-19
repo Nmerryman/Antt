@@ -26,7 +26,7 @@ Just for some packet notation:
 0x04 = conn only ack
 0x05 = small + single packet message (currently acts like \x06 and is wrapped as a multi-packet)
 0x06 = multi-packet message
-0x07 = resend packet
+0x07 = resend packets
 0x08 = done sending message
 0x09 = message fully built
 """
@@ -194,7 +194,6 @@ class Frame:
         Does the magic (if possible)
         (If possible) class will extract one whole frame from the input stream, parse and load them, and return the untouched remainder of the byte string
         """
-        data = self._remove_heartbeats(data)
         header_len = self._type_len + self._id_len + 2 * self._msg_part_len
         if len(data) > header_len:
             offset = 0
@@ -231,18 +230,9 @@ class Frame:
         buffer += itob_format(self.id, self._id_len)
         buffer += itob_format(self.part, self._msg_part_len)
         buffer += itob_format(self.total_parts, self._msg_part_len)
+        buffer += self.data
 
         return buffer
-
-    @staticmethod
-    def _remove_heartbeats(data: bytes):
-        # This should remove any leading heartbeats
-        # I think this can be removed
-        index = 0
-        while len(data) > index and data[index] == 0:  # 0 because I guess \x00 is not the same
-            index += 1
-
-        return data[index:]
 
 
 class FrameGenerator:
@@ -256,7 +246,6 @@ class FrameGenerator:
     full mesage id  (3)
     message part    (3)
     expected parts  (3)
-    message size    (2)
     </header>
     <message>
     data
@@ -286,7 +275,7 @@ class FrameGenerator:
 
         return new_id
 
-    def prep(self, obj: bytes, m_type: bytes = b'\x05') -> list[bytes]:
+    def prep(self, obj: bytes, m_type: bytes = b'\x05') -> list[Frame]:
         """
         This takes the type and whole base object and prepares a list of sendable byte strings
         """
@@ -301,14 +290,14 @@ class FrameGenerator:
                 obj = obj[self.message_space:]
 
             for num_a, a in enumerate(pre_chunks):
-                buffer += m_type                                # type
-                buffer += itob_format(m_id, 3)             # id
-                buffer += itob_format(num_a, 3)            # part num
-                buffer += itob_format(len(pre_chunks), 3)  # total parts
-                buffer += a
-                # Save and reset buffer
-                out.append(buffer)
-                buffer = b''
+                temp_frame = Frame()
+                temp_frame.type = m_type
+                temp_frame.id = m_id
+                temp_frame.part = num_a
+                temp_frame.total_parts = len(pre_chunks)
+                temp_frame.data = a
+                # Do we want to set built as true?
+                out.append(temp_frame)
 
         return out
 
@@ -479,6 +468,7 @@ class SocketConnectionUDP(threading.Thread):
             if len(a) == 0:
                 continue
             elif a == b'\x00':
+                # Not sure if this should be commented out or not
                 # This message also means the buffer is empty
                 # self.dest_socket_buffer_filled = 0
                 pass
@@ -496,6 +486,7 @@ class SocketConnectionUDP(threading.Thread):
         self.pre_parsed.clear()
 
     def send_bytes(self, data: bytes):
+        # This is the last time we see the bytes
         self.socket.sendto(data, self.target)
         self.last_action = time.time()
         # print(data.decode())
@@ -505,8 +496,19 @@ class SocketConnectionUDP(threading.Thread):
         We are sending a normal client/content message
         """
         prep = self.frame_generator.prep(data)
+
+        # Add missing dict to send memory (We know at least one frame exists)
+        if prep[0].id not in self.send_memory:
+            self.send_memory[prep[0].id] = {"meta": {"len": prep[0].total_parts, "done": False, "last update": 0}}
+
         for a in prep:
-            self.send_buffer.put(a)
+            self.send_buffer.put(a.generate())
+
+            # Add messages to sent memory
+            self.send_memory[a.id][a.part] = a
+
+        self.send_memory[prep[0].id]["meta"]["last update"] = time.time()
+        self.send_buffer.put(b"\x08" + itob_format(prep[0].id, 3))
 
     def send_heartbeat(self):
         key = b"\x00"  # first byte = 0 means heartbeat
@@ -523,6 +525,7 @@ class SocketConnectionUDP(threading.Thread):
     def store_incoming(self):
         """
         No authentication is done here because we assume nat is taking care of it rn
+        This can be optimized because we use len checking and exceptions
         """
         first = True
         current = 0
@@ -562,6 +565,7 @@ class SocketConnectionUDP(threading.Thread):
 
         if self.building_blocks[frame.id]["meta"]["len"] == len(self.building_blocks[frame.id]) - 1:  # -1 for meta key
             self.building_blocks[frame.id]["meta"]['done'] = True
+            self.send_buffer.put(b"\x09" + itob_format(frame.id, 3))
 
     def pop_finished_messages(self):
         out = []
