@@ -479,6 +479,7 @@ class SocketConnectionUDP(threading.Thread):
         log_txt(f"{self.src_port}: Done with verification", "verification")
 
     def _shutdown_socket(self):
+        # todo send a kill message/byte because the other side thinks we're still alive
         self.socket.close()
 
     def distribute_stored(self):
