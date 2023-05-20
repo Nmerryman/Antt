@@ -222,8 +222,12 @@ class Frame:
         """
         Uses fields to rebuild the raw byte string used to generate this.
         """
-        if not all((self.type, self.id, self.part, self.total_parts, self.data)):
-            raise InvalidData("Not all field for Frame are filled in")
+        if self.type is None or \
+            self.id is None or \
+            self.part is None or \
+            self.total_parts is None or \
+            self.data is None:
+            raise InvalidData(f"Not all field for Frame are filled in: {type(self.type)}, {type(self.id)}, {type(self.part)}, {type(self.total_parts)}, {type(self.data)}")
 
         buffer = b''
         buffer += self.type
@@ -368,7 +372,7 @@ class SocketConnectionUDP(threading.Thread):
             while not self.send_buffer.empty() and "send_buffer" not in self.debug:
                 val = self.send_buffer.get()
                 if len(val) + self.dest_socket_buffer_filled < self.dest_socket_buffer_size:
-                    log_txt(f"{self.src_port}: sending {val}")
+                    log_txt(f"{self.src_port}: sending len({len(val)}) {val}")
                     self.send_bytes(val)
                     self.dest_socket_buffer_filled += len(val)
                     # self.debug.append("send_buffer")
@@ -383,11 +387,13 @@ class SocketConnectionUDP(threading.Thread):
 
             # Send out any read messages
             for a in self.pop_finished_messages():
+                log_txt(f"{self.src_port}: popping finished messages into out_queue")
                 self.out_queue.put(a)
             # Execute any incoming commands
             # pprint.pprint(self.__dict__)
             while not self.in_queue.empty():
                 val = self.in_queue.get()
+                log_txt(f"{self.src_port}: reading in_queue input [{val if len(val) < 100 else 'too long'}]")
                 self.in_queue.task_done()
                 if isinstance(val, str):
                     if val == "kill":
@@ -399,11 +405,13 @@ class SocketConnectionUDP(threading.Thread):
                     self.send_msg(val)
 
             while self.on_message and not self.out_queue.empty():
+                log_txt(f"{self.src_port}: executing on_message callback")
                 self.on_message(self.out_queue.get())
                 self.out_queue.task_done()
 
             # Check if we need to send a heartbeat
             if time.time() > self.last_action + self.max_no_action_delay:
+                log_txt(f"{self.src_port}: sending idle heartbeat")
                 self.send_heartbeat()
             # time.sleep(.1)
 
@@ -473,6 +481,7 @@ class SocketConnectionUDP(threading.Thread):
                 # self.dest_socket_buffer_filled = 0
                 pass
             elif a == b"\x02" or a == b"\x04":  # If we care for the acks, we just need to split up this line
+                log_txt(f"{self.src_port}: ack/resetting space flag")
                 self.dest_socket_buffer_filled = 0
                 self.awaiting_space = False
             elif a == b'\x01':
@@ -575,6 +584,8 @@ class SocketConnectionUDP(threading.Thread):
                 for a in range(0, v['meta']['len']):
                     buffer += v[a].data
                 out.append(buffer)
+                log_txt(f"{self.src_port}: popping [{k}] as done")
+                # fixme we want to delete when done
                 # del self.building_blocks[k]
                 self.debug.append(k)
 
