@@ -269,7 +269,7 @@ class FrameGenerator:
         Generate a new id value.
         This should (but dosesn't rn) wrap and remove old values
         """
-        new_id = random.randint(0, 9999)
+        new_id = random.randint(0, 99999)
 
         new_id = self.latest_id + 1
         while new_id in self.ids_in_use:
@@ -352,8 +352,10 @@ class SocketConnectionUDP(threading.Thread):
         self.pre_parsed = []
         self.building_blocks = {}
         self.send_memory = {}
+        self.request_missing_latency = 1
         self.partial_msg_max_count_bytes = int(math.log(self.buffer_size, 256) // 1 + 1)  # Used for splitting up internal messages
         self.frame_generator = FrameGenerator(self.buffer_size)
+        self.todo = Queue()  # What if we built a tdo list on what we need to do. We could even use priority queue
 
     def run(self) -> None:
         """
@@ -367,6 +369,13 @@ class SocketConnectionUDP(threading.Thread):
 
             # Parse all available frames in the partial
             self.distribute_stored()
+
+            # Check all "In progress" messages to see if anything is past it's latency and needs to re-request frames
+            current_time = time.time()
+            for k, v in self.building_blocks.items():
+                if v["meta"]["last update"] + self.request_missing_latency < current_time:
+                    self.request_missing_frames(k)
+                    v["meta"]["last update"] = current_time
 
             # Send anything that is ready in the send buffer given there is space in dest buffer
             while not self.send_buffer.empty() and "send_buffer" not in self.debug:
@@ -491,6 +500,30 @@ class SocketConnectionUDP(threading.Thread):
             elif a[0] == 5 or a[0] == 6:  # I guess this op turns it into an int
                 temp = Frame(a)
                 self.incoming_organizer(temp)
+            elif a[0] == 9:
+                # We can now delete from saved
+                done_id = int.from_bytes(a[1:], "big")
+                del self.send_memory[done_id]
+                log_txt(f"{self.src_port}: del [{done_id}] after completion flag")
+            elif a[0] == 8:
+                # Right now we are assuming that nothing will arrive after the \x08
+                # This lets us start requesting for missing information as quick as possible before waiting for the latency timeout
+                done_id = int.from_bytes(a[1:], "big")
+                # FIXME every 40th frame is missing
+                self.request_missing_frames(done_id)
+                log_txt(f"{self.src_port}: Done requesting missing")
+            elif a[0] == 7:
+                log_txt(f"{self.src_port}: starting to resend")
+                missing_id = int.from_bytes(a[1:4], "big")
+                temp = a[4:]
+                parts = []
+                while temp:
+                    parts.append(int.from_bytes(temp[:3], "big"))
+                    temp = temp[3:]
+                log_txt(f"{self.src_port}: [{missing_id}] will resend {parts}")
+                if missing_id in self.send_memory:
+                    for b in parts:
+                        self.send_buffer.put(self.send_memory[missing_id][b].generate())
 
         self.pre_parsed.clear()
 
@@ -573,8 +606,29 @@ class SocketConnectionUDP(threading.Thread):
         self.building_blocks[frame.id]["meta"]["last update"] = time.time()
 
         if self.building_blocks[frame.id]["meta"]["len"] == len(self.building_blocks[frame.id]) - 1:  # -1 for meta key
+            log_txt(f"{self.src_port}: [{frame.id}] detected as done")
             self.building_blocks[frame.id]["meta"]['done'] = True
             self.send_buffer.put(b"\x09" + itob_format(frame.id, 3))
+
+    def request_missing_frames(self, id_num: int):
+        if id_num in self.building_blocks:
+            total_nums = self.building_blocks[id_num]["meta"]["len"]
+        else:
+            total_nums = 0
+        missing = []
+        for a in range(total_nums):
+            if a not in self.building_blocks[id_num]:
+                missing.append(a)
+        log_txt(f"{self.src_port}: [{id_num}] requesting missing {missing}")
+
+        buffer_space = int((self.buffer_size - 4) / 3)
+        while missing:
+            chunk = missing[:buffer_space]
+            missing = missing[buffer_space:]
+            temp_b = b"\x07" + itob_format(id_num, 3)
+            for a in chunk:
+                temp_b += itob_format(a, 3)
+            self.send_buffer.put(temp_b)
 
     def pop_finished_messages(self):
         out = []
@@ -586,7 +640,7 @@ class SocketConnectionUDP(threading.Thread):
                 out.append(buffer)
                 log_txt(f"{self.src_port}: popping [{k}] as done")
                 # fixme we want to delete when done
-                # del self.building_blocks[k]
+                del self.building_blocks[k]
                 self.debug.append(k)
 
         # print(out)
