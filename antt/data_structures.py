@@ -595,23 +595,7 @@ class SocketConnectionUDP(threading.Thread):
             time.sleep(.01)
 
     def block_until_message(self, timeout: int = 1) -> bytes:
-        sleep_len = .1
-        count = 0
-        try:
-            while self.out_queue.empty() and count < timeout / sleep_len:
-                time.sleep(sleep_len)
-                count += 1
-            if count == int(timeout / sleep_len):
-                raise KeyboardInterrupt  # There's probably a better way to do this
-        except KeyboardInterrupt:
-            self.in_queue.put("kill")
-        try:
-            temp = self.out_queue.get(timeout=3)  # fixme This is likely what actually kills the thread
-            self.out_queue.task_done()
-        except Empty:
-            print("No messages found? fexme")
-            temp = "Nothing"
-        return temp
+        return self.out_queue.get(timeout=timeout)
 
     def block_until_shutdown(self, timeout: int = 1):
         start = time.time()
