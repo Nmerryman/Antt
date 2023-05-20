@@ -3,7 +3,10 @@ import os
 import time
 
 if __name__ == '__main__':
-    os.remove("log.txt")
+    try:
+        os.remove("log.txt")
+    except FileNotFoundError:
+        pass
     lport = 33773
     dport = 33553
     server = ds.SocketConnectionUDP(lport, ("127.0.0.1", dport))
