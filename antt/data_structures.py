@@ -365,6 +365,7 @@ class SocketConnectionUDP(threading.Thread):
         self._setup_socket()
 
         while self.alive:
+            # Fixme we still have a bug where every 40th frame gets dropped
             self.store_incoming()  # may want to call this multiple times to prioritize not losing data
 
             # Parse all available frames in the partial
@@ -381,7 +382,7 @@ class SocketConnectionUDP(threading.Thread):
             while not self.send_buffer.empty() and "send_buffer" not in self.debug:
                 val = self.send_buffer.get()
                 if len(val) + self.dest_socket_buffer_filled < self.dest_socket_buffer_size:
-                    log_txt(f"{self.src_port}: sending len({len(val)}) {val}")
+                    log_txt(f"{self.src_port}: sending len({len(val)}) {val}", "udp run")
                     self.send_bytes(val)
                     self.dest_socket_buffer_filled += len(val)
                     # self.debug.append("send_buffer")
@@ -389,20 +390,20 @@ class SocketConnectionUDP(threading.Thread):
                     self.send_buffer.task_done()
                 else:
                     if not self.awaiting_space:
-                        log_txt(f"{self.src_port}: sending awaiting space")
+                        log_txt(f"{self.src_port}: sending awaiting space", "udp run")
                         self.send_bytes(b'\x01')
                         self.awaiting_space = True
                     break
 
             # Send out any read messages
             for a in self.pop_finished_messages():
-                log_txt(f"{self.src_port}: popping finished messages into out_queue")
+                log_txt(f"{self.src_port}: popping finished messages into out_queue", "udp run")
                 self.out_queue.put(a)
             # Execute any incoming commands
             # pprint.pprint(self.__dict__)
             while not self.in_queue.empty():
                 val = self.in_queue.get()
-                log_txt(f"{self.src_port}: reading in_queue input [{val if len(val) < 100 else 'too long'}]")
+                log_txt(f"{self.src_port}: reading in_queue input [{val if len(val) < 100 else 'too long'}]", "udp run")
                 self.in_queue.task_done()
                 if isinstance(val, str):
                     if val == "kill":
@@ -414,13 +415,13 @@ class SocketConnectionUDP(threading.Thread):
                     self.send_msg(val)
 
             while self.on_message and not self.out_queue.empty():
-                log_txt(f"{self.src_port}: executing on_message callback")
+                log_txt(f"{self.src_port}: executing on_message callback", "udp run")
                 self.on_message(self.out_queue.get())
                 self.out_queue.task_done()
 
             # Check if we need to send a heartbeat
             if time.time() > self.last_action + self.max_no_action_delay:
-                log_txt(f"{self.src_port}: sending idle heartbeat")
+                log_txt(f"{self.src_port}: sending idle heartbeat", "udp run")
                 self.send_heartbeat()
             # time.sleep(.1)
 
@@ -490,7 +491,7 @@ class SocketConnectionUDP(threading.Thread):
                 # self.dest_socket_buffer_filled = 0
                 pass
             elif a == b"\x02" or a == b"\x04":  # If we care for the acks, we just need to split up this line
-                log_txt(f"{self.src_port}: ack/resetting space flag")
+                log_txt(f"{self.src_port}: ack/resetting space flag", "udp distribute")
                 self.dest_socket_buffer_filled = 0
                 self.awaiting_space = False
             elif a == b'\x01':
@@ -504,23 +505,23 @@ class SocketConnectionUDP(threading.Thread):
                 # We can now delete from saved
                 done_id = int.from_bytes(a[1:], "big")
                 del self.send_memory[done_id]
-                log_txt(f"{self.src_port}: del [{done_id}] after completion flag")
+                log_txt(f"{self.src_port}: del [{done_id}] after completion flag", "udp distribute")
             elif a[0] == 8:
                 # Right now we are assuming that nothing will arrive after the \x08
                 # This lets us start requesting for missing information as quick as possible before waiting for the latency timeout
                 done_id = int.from_bytes(a[1:], "big")
                 # FIXME every 40th frame is missing
                 self.request_missing_frames(done_id)
-                log_txt(f"{self.src_port}: Done requesting missing")
+                log_txt(f"{self.src_port}: Done requesting missing", "udp distribute")
             elif a[0] == 7:
-                log_txt(f"{self.src_port}: starting to resend")
+                log_txt(f"{self.src_port}: starting to resend", "udp distribute")
                 missing_id = int.from_bytes(a[1:4], "big")
                 temp = a[4:]
                 parts = []
                 while temp:
                     parts.append(int.from_bytes(temp[:3], "big"))
                     temp = temp[3:]
-                log_txt(f"{self.src_port}: [{missing_id}] will resend {parts}")
+                log_txt(f"{self.src_port}: [{missing_id}] will resend {parts}", "udp distribute")
                 if missing_id in self.send_memory:
                     for b in parts:
                         self.send_buffer.put(self.send_memory[missing_id][b].generate())
@@ -571,7 +572,6 @@ class SocketConnectionUDP(threading.Thread):
         """
         first = True
         current = 0
-        # log_txt(f"{self.src_port}: storing any incomming", "udp store")
         start_len = len(self.pre_parsed)
         while len(self.pre_parsed) > current or first:
             first = False
@@ -606,7 +606,7 @@ class SocketConnectionUDP(threading.Thread):
         self.building_blocks[frame.id]["meta"]["last update"] = time.time()
 
         if self.building_blocks[frame.id]["meta"]["len"] == len(self.building_blocks[frame.id]) - 1:  # -1 for meta key
-            log_txt(f"{self.src_port}: [{frame.id}] detected as done")
+            log_txt(f"{self.src_port}: [{frame.id}] detected as done", "udp organizer")
             self.building_blocks[frame.id]["meta"]['done'] = True
             self.send_buffer.put(b"\x09" + itob_format(frame.id, 3))
 
@@ -619,7 +619,7 @@ class SocketConnectionUDP(threading.Thread):
         for a in range(total_nums):
             if a not in self.building_blocks[id_num]:
                 missing.append(a)
-        log_txt(f"{self.src_port}: [{id_num}] requesting missing {missing}")
+        log_txt(f"{self.src_port}: [{id_num}] requesting missing {missing}", "udp request missing")
 
         buffer_space = int((self.buffer_size - 4) / 3)
         while missing:
@@ -638,7 +638,7 @@ class SocketConnectionUDP(threading.Thread):
                 for a in range(0, v['meta']['len']):
                     buffer += v[a].data
                 out.append(buffer)
-                log_txt(f"{self.src_port}: popping [{k}] as done")
+                log_txt(f"{self.src_port}: popping [{k}] as done", "udp pop messages")
                 # fixme we want to delete when done
                 del self.building_blocks[k]
                 self.debug.append(k)

@@ -17,28 +17,12 @@ dl [src name] - Download file""")
 
     while client.alive and client.verified_connection:
         command = input("> ")
+
         command_packet = ds.Packet(*command.split()).generate()
-        if command == "db":
-            code.interact(local=locals())
-        elif command == "dp":
-            pprint(client.__dict__)
-            continue
         client.in_queue.put(command_packet)
 
-
-        try:
-            response_raw = client.block_until_message(3)
-            response = ds.Packet().parse(response_raw)
-        except:
-            option = input("EXCEPTION: c-continue, i-interactive")
-            if option == "c":
-                pass
-            elif option == "i":
-                code.interact(local=locals())
-
-        # if command.split()[0] == "dl":
-        #     code.interact(local=locals())
-        #     input(">>>><<<<>>>>")  # incase this matters
+        response_raw = client.block_until_message(5)
+        response = ds.Packet().parse(response_raw)
 
         if response.type == "ls":
             print("Dirs:", response.value)
