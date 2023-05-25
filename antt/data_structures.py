@@ -209,6 +209,7 @@ class Frame:
             if len(data) < header_len:
                 print("Not enough data:", data)  # this is mainly for debugging but I might keep it in
                 # THIS COULD CAUSE A BUG LATER IF I DON'T CHECK FOR self.built
+                # We should probably raise an error here instead
                 # self.data = data[offset:]
                 return data
 
@@ -247,9 +248,9 @@ class FrameGenerator:
     frame shape:
     <header>
     type info       (1)
-    full mesage id  (3)
-    message part    (3)
-    expected parts  (3)
+    full mesage id  (5)
+    message part    (5)
+    expected parts  (5)
     </header>
     <message>
     data
@@ -258,8 +259,8 @@ class FrameGenerator:
     def __init__(self, buffer_size: int):
         self.buffer_size = buffer_size
         self.message_space = self.buffer_size - 11  # We probably don't want to hard code the 11
-        self.id_len = 3
-        self.msg_part_len = 3
+        self.id_len = 5
+        self.msg_part_len = 5
         self.ids_in_use = set()
         self.latest_id = 0  # It would probably be better to randomly generate these
         # We are assuming type info will always be 1 long
@@ -271,6 +272,7 @@ class FrameGenerator:
         """
         new_id = random.randint(0, 99999)
 
+        # This method organizes packets, but requires full restarts to avoid collisions
         new_id = self.latest_id + 1
         while new_id in self.ids_in_use:
             self.latest_id = new_id
@@ -294,7 +296,7 @@ class FrameGenerator:
                 obj = obj[self.message_space:]
 
             for num_a, a in enumerate(pre_chunks):
-                temp_frame = Frame()
+                temp_frame = self.frame_template()
                 temp_frame.type = m_type
                 temp_frame.id = m_id
                 temp_frame.part = num_a
@@ -304,6 +306,12 @@ class FrameGenerator:
                 out.append(temp_frame)
 
         return out
+
+    def frame_template(self):
+        temp = Frame()
+        temp._id_len = self.id_len
+        temp._msg_part_len = self.msg_part_len
+        return temp
 
 
 class SocketConnectionUDP(threading.Thread):
@@ -501,7 +509,8 @@ class SocketConnectionUDP(threading.Thread):
             elif a == b'\x03':
                 self.socket.sendto(b'\04', self.target)
             elif a[0] == 5 or a[0] == 6:  # I guess this op turns it into an int
-                temp = Frame(a)
+                temp = self.frame_generator.frame_template()
+                temp.parse(a)
                 self.incoming_organizer(temp)
             elif a[0] == 9:
                 # We can now delete from saved
@@ -512,17 +521,17 @@ class SocketConnectionUDP(threading.Thread):
                 # Right now we are assuming that nothing will arrive after the \x08
                 # This lets us start requesting for missing information as quick as possible before waiting for the latency timeout
                 done_id = int.from_bytes(a[1:], "big")
-                # FIXME every 40th frame is missing
+                # FIXME every 40th frame is missing when sending burst of packets
                 self.request_missing_frames(done_id)
                 log_txt(f"{self.src_port}: Done requesting missing", "udp distribute")
             elif a[0] == 7:
                 log_txt(f"{self.src_port}: starting to resend", "udp distribute")
-                missing_id = int.from_bytes(a[1:4], "big")
-                temp = a[4:]
+                missing_id = int.from_bytes(a[1: 1 + self.frame_generator.id_len], "big")
+                temp = a[1 + self.frame_generator.id_len:]
                 parts = []
                 while temp:
-                    parts.append(int.from_bytes(temp[:3], "big"))
-                    temp = temp[3:]
+                    parts.append(int.from_bytes(temp[:self.frame_generator.msg_part_len], "big"))
+                    temp = temp[self.frame_generator.msg_part_len:]
                 log_txt(f"{self.src_port}: [{missing_id}] will resend {parts}", "udp distribute")
                 if missing_id in self.send_memory:
                     for b in parts:
@@ -553,7 +562,7 @@ class SocketConnectionUDP(threading.Thread):
             self.send_memory[a.id][a.part] = a
 
         self.send_memory[prep[0].id]["meta"]["last update"] = time.time()
-        self.send_buffer.put(b"\x08" + itob_format(prep[0].id, 3))
+        self.send_buffer.put(b"\x08" + itob_format(prep[0].id, self.frame_generator.id_len))
 
     def send_heartbeat(self):
         key = b"\x00"  # first byte = 0 means heartbeat
@@ -614,7 +623,7 @@ class SocketConnectionUDP(threading.Thread):
         if self.building_blocks[frame.id]["meta"]["len"] == len(self.building_blocks[frame.id]) - 1:  # -1 for meta key
             log_txt(f"{self.src_port}: [{frame.id}] detected as done", "udp organizer")
             self.building_blocks[frame.id]["meta"]['done'] = True
-            self.send_buffer.put(b"\x09" + itob_format(frame.id, 3))
+            self.send_buffer.put(b"\x09" + itob_format(frame.id, self.frame_generator.id_len))
         self.last_updated = frame.id
 
     def request_missing_frames(self, id_num: int):
@@ -625,19 +634,19 @@ class SocketConnectionUDP(threading.Thread):
             total_nums = self.building_blocks[id_num]["meta"]["len"]
         else:
             total_nums = 0
-        missing = []
+        missing = []  # What messages are missing packets
         for a in range(total_nums):
             if a not in self.building_blocks[id_num]:
                 missing.append(a)
         log_txt(f"{self.src_port}: [{id_num}] requesting missing {missing}", "udp request missing")
 
-        buffer_space = int((self.buffer_size - 4) / 3)
+        buffer_space = int((self.buffer_size - (1 + self.frame_generator.id_len)) / self.frame_generator.msg_part_len)
         while missing:
             chunk = missing[:buffer_space]
             missing = missing[buffer_space:]
-            temp_b = b"\x07" + itob_format(id_num, 3)
+            temp_b = b"\x07" + itob_format(id_num, self.frame_generator.id_len)
             for a in chunk:
-                temp_b += itob_format(a, 3)
+                temp_b += itob_format(a, self.frame_generator.msg_part_len)
             self.send_buffer.put(temp_b)
 
     def pop_finished_messages(self):
@@ -720,6 +729,7 @@ class SocketConnectionTCP(threading.Thread):
         # noinspection PyTypeChecker
         self.socket: socket.socket = None
         self.on_message = None  # out_queue message callback
+        self.msg_size_len = 5
 
         self.alive = False
         self.verified_connection = False
@@ -816,7 +826,7 @@ class SocketConnectionTCP(threading.Thread):
     def send_msg(self, val: bytes):
         log_txt(f"{self.src_port}: sending message")
         self.socket.setblocking(True)
-        self.socket.sendall(len(val).to_bytes(5, "big"))
+        self.socket.sendall(len(val).to_bytes(self.msg_size_len, "big"))
         self.socket.sendall(val)
         self.socket.settimeout(0)
         self.last_action = time.time()
@@ -849,16 +859,16 @@ class SocketConnectionTCP(threading.Thread):
         messages = []
 
         while True:
-            if len(self.pre_parsed) < 6:
+            if len(self.pre_parsed) < 1 + self.msg_size_len:
                 log_txt(f"{self.src_port}: 1popping {messages}", "tcp socket pop")
                 return messages
-            current_len = int.from_bytes(self.pre_parsed[0:5], "big")
-            if len(self.pre_parsed) - 5 < current_len:
+            current_len = int.from_bytes(self.pre_parsed[0:self.msg_size_len], "big")
+            if len(self.pre_parsed) - self.msg_size_len < current_len:
                 log_txt(f"{self.src_port}: 2popping {messages}", "tcp socket pop")
                 return messages
 
-            messages.append(self.pre_parsed[5:5 + current_len])
-            self.pre_parsed = self.pre_parsed[5 + current_len:]
+            messages.append(self.pre_parsed[self.msg_size_len:self.msg_size_len + current_len])
+            self.pre_parsed = self.pre_parsed[self.msg_size_len + current_len:]
 
     def block_until_message(self, timeout: int = 1) -> bytes:
         sleep_len = .1
