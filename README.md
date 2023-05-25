@@ -69,3 +69,4 @@ Because the connections are meant to be used in a p2p context, the connection ti
 - No packet source verification.
 - Receiving a duplicated/delayed partial packet after marking message as complete will trigger the `missing frames` protocol to request missing pieces again.
 - Every 40th frame gets dropped so messages won't finish sending until a latency timeout triggers the `missing frames` protocol for the message.
+- Due to the nature of UDP, there are many more functions that can be used to help debug issues but don't need to be used in general.

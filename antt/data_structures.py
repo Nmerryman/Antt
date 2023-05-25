@@ -355,7 +355,8 @@ class SocketConnectionUDP(threading.Thread):
         self.request_missing_latency = 1
         self.partial_msg_max_count_bytes = int(math.log(self.buffer_size, 256) // 1 + 1)  # Used for splitting up internal messages
         self.frame_generator = FrameGenerator(self.buffer_size)
-        self.todo = Queue()  # What if we built a tdo list on what we need to do. We could even use priority queue
+        self.todo = Queue()  # What if we built a tdo list on what we need to do. We could even use priority queue. Not in use rn
+        self.last_updated: int = None
 
     def run(self) -> None:
         """
@@ -591,7 +592,7 @@ class SocketConnectionUDP(threading.Thread):
                 # print("connection reset error")
                 # self.alive = False
                 pass
-        if len(self.pre_parsed) != start_len and not (len(self.pre_parsed) == 1 and self.pre_parsed[0] == b"\x00"):
+        if len(self.pre_parsed) != start_len and not (len(self.pre_parsed) == 1 and self.pre_parsed[0] == b"\x00"):  # We should count this better so that we don't send way too many beats
             self.send_heartbeat()
 
     def incoming_organizer(self, frame: Frame):
@@ -614,6 +615,7 @@ class SocketConnectionUDP(threading.Thread):
             log_txt(f"{self.src_port}: [{frame.id}] detected as done", "udp organizer")
             self.building_blocks[frame.id]["meta"]['done'] = True
             self.send_buffer.put(b"\x09" + itob_format(frame.id, 3))
+        self.last_updated = frame.id
 
     def request_missing_frames(self, id_num: int):
         if id_num in self.building_blocks:
@@ -681,6 +683,11 @@ class SocketConnectionUDP(threading.Thread):
                 raise TimeoutError("Failed to shutdown in time")
             time.sleep(.01)
         self._shutdown_socket()
+
+    def get_message_status(self, m_id: int):
+        if m_id in self.building_blocks:
+            return self.building_blocks[m_id].keys(), self.building_blocks[m_id]["meta"]
+        return None
 
 
 class SocketConnectionTCP(threading.Thread):
