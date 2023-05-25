@@ -603,6 +603,10 @@ class SocketConnectionUDP(threading.Thread):
             self.building_blocks[frame.id] = {}
             self.building_blocks[frame.id]["meta"] = {"len": frame.total_parts, "done": False, "last update": 0}
 
+        # Don't insert anything if we don't need to
+        if self.building_blocks[frame.id]["meta"]["done"]:
+            return
+
         self.building_blocks[frame.id][frame.part] = frame
         self.building_blocks[frame.id]["meta"]["last update"] = time.time()
 
@@ -613,6 +617,9 @@ class SocketConnectionUDP(threading.Thread):
 
     def request_missing_frames(self, id_num: int):
         if id_num in self.building_blocks:
+            if self.building_blocks[id_num]["meta"]["done"]:  # Don't request anything if we already have everything
+                log_txt(f"{self.src_port}: message marked as done", "udp request missing")
+                return
             total_nums = self.building_blocks[id_num]["meta"]["len"]
         else:
             total_nums = 0
@@ -633,18 +640,22 @@ class SocketConnectionUDP(threading.Thread):
 
     def pop_finished_messages(self):
         out = []
+        completed_parts = {}
         for k, v in list(self.building_blocks.items()):
-            if v['meta']['done'] and k not in self.debug:
+            if v['meta']['done'] and len(v) > v['meta']['len']:  # Done and still holding all parts
                 buffer = b''
                 for a in range(0, v['meta']['len']):
                     buffer += v[a].data
                 out.append(buffer)
                 log_txt(f"{self.src_port}: popping [{k}] as done", "udp pop messages")
-                # fixme we want to delete when done
+                # fixme we want to delete only the data when done
+                completed_parts[k] = {"meta": v['meta']}
+                completed_parts[k]['meta']['last update'] = time.time()
                 del self.building_blocks[k]
-                self.debug.append(k)
 
-        # print(out)
+        # Merge the dictionaries
+        self.building_blocks = {**self.building_blocks, **completed_parts}
+
         return out
 
     def set_buffer_size(self, size: int):
