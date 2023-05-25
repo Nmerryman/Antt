@@ -7,6 +7,7 @@ import random
 import socket
 import time
 import traceback
+import pprint
 
 import psutil
 import threading
@@ -104,6 +105,8 @@ class Packet:
 
     def generate(self):
         temp = self.storage.copy()
+
+        # using hex encoding basically 2x the memory size but is fast and safe in a json context
         if isinstance(temp["TYPE"], bytes):
             temp["TYPE"] = temp["TYPE"].hex()
             temp["type bytes"] = True
@@ -304,6 +307,8 @@ class FrameGenerator:
                 temp_frame.data = a
                 # Do we want to set built as true?
                 out.append(temp_frame)
+            if "frame prep" in TOPICS:
+                log_txt(f"enumerated {m_id} in {time.time() - timer}s", "frame prep")
 
         return out
 
@@ -361,7 +366,7 @@ class SocketConnectionUDP(threading.Thread):
         self.building_blocks = {}
         self.send_memory = {}
         self.request_missing_latency = 1
-        self.partial_msg_max_count_bytes = int(math.log(self.buffer_size, 256) // 1 + 1)  # Used for splitting up internal messages
+        self.partial_msg_max_count_bytes = int(math.log(self.buffer_size, 256) // 1 + 1)  # Used for splitting up internal messages (unused)
         self.frame_generator = FrameGenerator(self.buffer_size)
         self.todo = Queue()  # What if we built a tdo list on what we need to do. We could even use priority queue. Not in use rn
         self.last_updated: int = None
@@ -383,15 +388,16 @@ class SocketConnectionUDP(threading.Thread):
             # Check all "In progress" messages to see if anything is past it's latency and needs to re-request frames
             current_time = time.time()
             for k, v in self.building_blocks.items():
-                if v["meta"]["last update"] + self.request_missing_latency < current_time:
+                if not v["meta"]["done"] and v["meta"]["last update"] + self.request_missing_latency < current_time:
+                    log_txt(f"{self.src_port}: found [{k}] is missing frames", "udp run")
                     self.request_missing_frames(k)
                     v["meta"]["last update"] = current_time
 
             # Send anything that is ready in the send buffer given there is space in dest buffer
-            while not self.send_buffer.empty() and "send_buffer" not in self.debug:
+            while not self.send_buffer.empty():
                 val = self.send_buffer.get()
                 if len(val) + self.dest_socket_buffer_filled < self.dest_socket_buffer_size:
-                    log_txt(f"{self.src_port}: sending len({len(val)}) {val}", "udp run")
+                    log_txt(f"{self.src_port}: sending len({len(val)}) {val if len(val) < 100 else f'{val[:20]}...{val[-15:]}'}", "udp run")
                     self.send_bytes(val)
                     self.dest_socket_buffer_filled += len(val)
                     # self.debug.append("send_buffer")
@@ -413,15 +419,18 @@ class SocketConnectionUDP(threading.Thread):
             while not self.in_queue.empty():
                 val = self.in_queue.get()
                 log_txt(f"{self.src_port}: reading in_queue input [{val if len(val) < 100 else 'too long'}]", "udp run")
-                self.in_queue.task_done()
                 if isinstance(val, str):
                     if val == "kill":
                         self.alive = False
                         self._shutdown_socket()
                         return
                     self.out_queue.put((val, eval(val)))  # FIXME PROBABLY A MASSIVE SECURITY RISK
+
                 elif isinstance(val, bytes):
                     self.send_msg(val)
+                # It's probably better to make as done sooner, but this lets us see when we have parsed the message
+                self.in_queue.task_done()
+                log_txt(f"{self.src_port}: in_queue emptied", "udp run")
 
             while self.on_message and not self.out_queue.empty():
                 log_txt(f"{self.src_port}: executing on_message callback", "udp run")
@@ -549,18 +558,22 @@ class SocketConnectionUDP(threading.Thread):
         """
         We are sending a normal client/content message
         """
+        log_txt(f"{self.src_port}: prepping send_msg data", "udp send msg")
         prep = self.frame_generator.prep(data)
 
         # Add missing dict to send memory (We know at least one frame exists)
+        log_txt(f"{self.src_port}: prep send_memory for {prep[0].id}", "udp send msg")
         if prep[0].id not in self.send_memory:
             self.send_memory[prep[0].id] = {"meta": {"len": prep[0].total_parts, "done": False, "last update": 0}}
 
+        log_txt(f"{self.src_port}: putting [{prep[0].id}] into send buffer", "udp send msg")
         for a in prep:
             self.send_buffer.put(a.generate())
 
             # Add messages to sent memory
             self.send_memory[a.id][a.part] = a
 
+        log_txt(f"{self.src_port}: putting closing remarks into send buffer", "udp send msg")
         self.send_memory[prep[0].id]["meta"]["last update"] = time.time()
         self.send_buffer.put(b"\x08" + itob_format(prep[0].id, self.frame_generator.id_len))
 
@@ -911,8 +924,8 @@ class SocketConnectionTCP(threading.Thread):
 
 
 def exception_log(args):
-    log_txt(f"{args}")
-    log_txt(f"{traceback.format_tb(args.exc_traceback)}")
+    log_txt(pprint.pformat(args))
+    log_txt("".join(traceback.format_tb(args.exc_traceback)))
 threading.excepthook = exception_log
 
 
