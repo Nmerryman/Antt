@@ -70,3 +70,9 @@ Because the connections are meant to be used in a p2p context, the connection ti
 - Receiving a duplicated/delayed partial packet after marking message as complete will trigger the `missing frames` protocol to request missing pieces again.
 - Every 40th frame gets dropped so messages won't finish sending until a latency timeout triggers the `missing frames` protocol for the message.
 - Due to the nature of UDP, there are many more functions that can be used to help debug issues but don't need to be used in general.
+
+## Benchmarks
+These are just some very rough values:
+### UDP
+From load file to saved file, locally transferring a 760MB file took 5m50s or had a throuh put of about 2MBps.
+There seemed to be slowdowns due to lost frames and delays when requesting the next set (maybe timeout_latency or some memory thing)

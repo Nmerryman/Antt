@@ -261,9 +261,9 @@ class FrameGenerator:
     """
     def __init__(self, buffer_size: int):
         self.buffer_size = buffer_size
-        self.message_space = self.buffer_size - 11  # We probably don't want to hard code the 11
         self.id_len = 5
         self.msg_part_len = 5
+        self.message_space = self.buffer_size - 1 - self.id_len - 2 * self.msg_part_len  # We probably don't want to hard code the 11
         self.ids_in_use = set()
         self.latest_id = 0  # It would probably be better to randomly generate these
         # We are assuming type info will always be 1 long
@@ -294,9 +294,16 @@ class FrameGenerator:
             m_id = self.new_id()
             # Pre-split all the data chunks
             pre_chunks = []
-            while obj:
-                pre_chunks.append(obj[:self.message_space])
-                obj = obj[self.message_space:]
+            log_txt(f"starting chunking", "frame prep")
+            if "frame prep" in TOPICS:
+                timer = time.time()
+            index = 0
+            while index < len(obj):
+                pre_chunks.append(obj[index:index + self.message_space])
+                index += self.message_space
+            if "frame prep" in TOPICS:
+                log_txt(f"{m_id} built {len(pre_chunks)} chunks in {time.time() - timer}s", "frame prep")
+                timer = time.time()
 
             for num_a, a in enumerate(pre_chunks):
                 temp_frame = self.frame_template()
@@ -667,9 +674,11 @@ class SocketConnectionUDP(threading.Thread):
         completed_parts = {}
         for k, v in list(self.building_blocks.items()):
             if v['meta']['done'] and len(v) > v['meta']['len']:  # Done and still holding all parts
-                buffer = b''
-                for a in range(0, v['meta']['len']):
-                    buffer += v[a].data
+                log_txt(f"{self.src_port}: {k} is ready for popping", "udp pop messages")
+                # buffer = b''
+                # for a in range(0, v['meta']['len']):
+                #     buffer += v[a].data
+                buffer = b"".join([v[a].data for a in range(0, v["meta"]["len"])])
                 out.append(buffer)
                 log_txt(f"{self.src_port}: popping [{k}] as done", "udp pop messages")
                 # fixme we want to delete only the data when done
