@@ -2,7 +2,7 @@
 
 DEBUG = True
 # Options all(default), verification, mainloop, start_conn, DS socket loop, tcp socket setup
-TOPICS = {"all", "udp pop messages", "frame prep"}
+TOPICS = {"all"}
 
 
 def log(*text):

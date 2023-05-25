@@ -40,16 +40,20 @@ if __name__ == '__main__':
             elif message.type == "dl":
                 try:
                     with open(message.value, 'rb') as f:
+                        # Added a bunch of benchmark timing
                         data = f.read()
-                        server.in_queue.put(ds.Packet("file", data).generate())
-                        print("file sent")
+                        timer = time.time()
+                        gen_data = ds.Packet("file", data).generate()
+                        print(f"Generated packet in {time.time() - timer}s, len={len(gen_data)}")
+                        server.in_queue.put(gen_data)
+                        print("file inserted at", time.time())
                 except FileNotFoundError:
                     server.in_queue.put(ds.Packet("text", f"File '{message.value}' was not found").generate())
 
         else:
             # So we don't just spin away at max speed
             time.sleep(.1)
-            if os.path.exists("df"):
+            if os.path.exists("df"):  # create file to start debugging server
                 import code
                 from pprint import pprint
                 code.interact(local=locals())

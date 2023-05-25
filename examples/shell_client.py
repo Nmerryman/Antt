@@ -1,3 +1,4 @@
+import time
 import antt.data_structures as ds
 import code
 from pprint import pprint
@@ -25,7 +26,20 @@ dl [src name] - Download file""")
             command_packet = ds.Packet(*parts).generate()
         client.in_queue.put(command_packet)
 
-        response_raw = client.block_until_message(5)
+        # show progress if transfer takes more than 5s
+        start_wait = time.time()
+        last_len = 0
+        while client.out_queue.empty():
+            time.sleep(.5)
+            if time.time() - start_wait > 5 and client.last_updated:
+                temp_data = client.get_message_status(client.last_updated)
+                if len(temp_data[0]) != last_len:
+                    print(len(temp_data[0]) - 1, temp_data[1])
+                    last_len = len(temp_data[0])
+        client.last_updated = None
+
+        # Extract message from out_queue
+        response_raw = client.block_until_message()
         response = ds.Packet().parse(response_raw)
 
         if response.type == "ls":
