@@ -18,7 +18,11 @@ dl [src name] - Download file""")
     while client.alive and client.verified_connection:
         command = input("> ")
 
-        command_packet = ds.Packet(*command.split()).generate()
+        parts = command.split()
+        if '"' in command:  # If there are quotes we assume that the spaces are all part of the same value
+            command_packet = ds.Packet(parts[0], " ".join(parts[1:])[1:-1]).generate()
+        else:
+            command_packet = ds.Packet(*parts).generate()
         client.in_queue.put(command_packet)
 
         response_raw = client.block_until_message(5)

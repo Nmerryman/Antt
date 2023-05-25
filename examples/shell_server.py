@@ -32,8 +32,11 @@ if __name__ == '__main__':
                 server.in_queue.put(ds.Packet("ls", dirs, files).generate())
             elif message.type == "cd":
                 prev = os.path.basename(os.getcwd())
-                os.chdir(message.value)
-                server.in_queue.put(ds.Packet("cd", f"{prev}->{message.value}").generate())
+                try:
+                    os.chdir(message.value)
+                    server.in_queue.put(ds.Packet("cd", f"{prev}->{message.value}").generate())
+                except FileNotFoundError:
+                    server.in_queue.put(ds.Packet("text", f"Directory '{message.value}' was not found").generate())
             elif message.type == "dl":
                 try:
                     with open(message.value, 'rb') as f:
