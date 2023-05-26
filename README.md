@@ -75,10 +75,13 @@ Because the connections are meant to be used in a p2p context, the connection ti
 These are just some very rough values:
 ### UDP
 From load file to saved file, locally transferring a 760MB file took 5m50s or had a throughput of about 2MBps.
-There seemed to be slowdowns due to lost frames and delays when requesting the next set (maybe timeout_latency, some memory, or os socket thing)
+Same as before but when done over a local network, a 80MB file took 1m30s and had a throughput of about 0.89MBps.
+There seemed to be slowdowns due to lost frames and delays when requesting the next set (maybe timeout_latency, some memory, or os socket thing).
+Sending frames seems to slow to a crawl when file is about 600k frames large (around the 300MB original file size).
 ### TCP
 From load file to saved file, locally transferring a 760MB file took 1m09s or had a throughput of about 11MBps.
-
+Same as before but when done over a local network, a 80MB file took 5m55s and had a throughput of about 0.23MBps.
+Compared to UDP, TCP speed seems much more stable. This is likely due to a bug causing UDP to become slow over time, but may be worth the tradeoff if the dl time becomes too long.
 
 # TODO
 - Comprehensive tests that check for more paths/cases
