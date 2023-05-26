@@ -2,3 +2,5 @@ venv
 .idea
 *__pycache__*
 log.txt
+examples/large.mp4
+examples/med.mp4
