@@ -747,6 +747,7 @@ class SocketConnectionTCP(threading.Thread):
             self.out_queue = Queue()
 
         self.last_action = 0
+        self.last_updated = 0
         self.max_no_action_delay = 20
         # noinspection PyTypeChecker
         self.socket: socket.socket = None
@@ -845,9 +846,10 @@ class SocketConnectionTCP(threading.Thread):
         self.socket.close()
         self.alive = False
 
-    def send_msg(self, val: bytes):
+    def send_msg(self, val: bytes, m_type: bytes = b"\x05"):  # 05 has been designated the standard message type byte
         log_txt(f"{self.src_port}: sending message")
         self.socket.setblocking(True)
+        self.socket.sendall(m_type)
         self.socket.sendall(len(val).to_bytes(self.msg_size_len, "big"))
         self.socket.sendall(val)
         self.socket.settimeout(0)
@@ -858,12 +860,16 @@ class SocketConnectionTCP(threading.Thread):
         self.last_action = time.time()
 
     def store_incoming(self):
+        temp_parts = [self.pre_parsed]
         try:
             while True:
-                current = len(self.pre_parsed)
-                self.pre_parsed += self.socket.recv(self.buffer_size)
-                log_txt(f"{self.src_port}: saved packet -> {self.pre_parsed}", "tcp socket store")
-                if len(self.pre_parsed) == current:
+                current = len(temp_parts)
+                temp_val = self.socket.recv(self.buffer_size)
+                if temp_val != "":
+                    temp_parts.append(temp_val)
+                log_txt(f"{self.src_port}: saved packet -> {temp_val}", "tcp socket store")
+                self.last_updated = time.time()
+                if len(temp_parts) == current:
                     break
         except socket.timeout:
             pass
@@ -876,21 +882,43 @@ class SocketConnectionTCP(threading.Thread):
             log_txt(f"{self.src_port}: {e}")
             raise e
 
+        if len(temp_parts) > 1:
+            self.pre_parsed = b"".join(temp_parts)
+            log_txt(f"{self.src_port}: joining parts -> {self.pre_parsed}", "tcp socket store")
+
     def pop_finished_messages(self):
 
         messages = []
 
-        while True:
-            if len(self.pre_parsed) < 1 + self.msg_size_len:
-                log_txt(f"{self.src_port}: 1popping {messages}", "tcp socket pop")
-                return messages
-            current_len = int.from_bytes(self.pre_parsed[0:self.msg_size_len], "big")
-            if len(self.pre_parsed) - self.msg_size_len < current_len:
-                log_txt(f"{self.src_port}: 2popping {messages}", "tcp socket pop")
+        # Remove heartbeats
+        h_i = 0
+        while len(self.pre_parsed) > h_i and self.pre_parsed[h_i] == 0:
+            h_i += 1
+        if h_i != 0:
+            log_txt(f"{self.src_port}: removing {h_i} heartbeats", "tcp socket pop")
+            self.pre_parsed = self.pre_parsed[h_i:]
+
+        while len(self.pre_parsed) > 0:
+            if self.pre_parsed[0] == 5:  # Type implies it's a regular message
+                # Enough space for the header?
+                if len(self.pre_parsed) < 1 + self.msg_size_len:
+                    # log_txt(f"{self.src_port}: 1popping {messages}", "tcp socket pop")
+                    return messages
+                current_len = int.from_bytes(self.pre_parsed[1:1 + self.msg_size_len], "big")
+                # Enough data to fulfill size promise?
+                if len(self.pre_parsed) - self.msg_size_len - 1 < current_len:
+                    # log_txt(f"{self.src_port}: 2popping {messages}", "tcp socket pop")
+                    return messages
+
+                debug_val = self.pre_parsed[1 + self.msg_size_len:1 + self.msg_size_len + current_len]
+                messages.append(self.pre_parsed[1 + self.msg_size_len:1 + self.msg_size_len + current_len])
+                log_txt(f"{self.src_port}: added message of len={len(messages[-1])} to pop")
+                # log_txt(f"{self.src_port}: size={self.msg_size_len}, mlen={current_len}, source={self.pre_parsed}, out={debug_val}")
+                self.pre_parsed = self.pre_parsed[1 + self.msg_size_len + current_len:]
+            else:
                 return messages
 
-            messages.append(self.pre_parsed[self.msg_size_len:self.msg_size_len + current_len])
-            self.pre_parsed = self.pre_parsed[self.msg_size_len + current_len:]
+        return messages
 
     def block_until_message(self, timeout: int = 1) -> bytes:
         sleep_len = .1
