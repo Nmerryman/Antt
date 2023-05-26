@@ -74,5 +74,18 @@ Because the connections are meant to be used in a p2p context, the connection ti
 ## Benchmarks
 These are just some very rough values:
 ### UDP
-From load file to saved file, locally transferring a 760MB file took 5m50s or had a throuh put of about 2MBps.
-There seemed to be slowdowns due to lost frames and delays when requesting the next set (maybe timeout_latency or some memory thing)
+From load file to saved file, locally transferring a 760MB file took 5m50s or had a throughput of about 2MBps.
+There seemed to be slowdowns due to lost frames and delays when requesting the next set (maybe timeout_latency, some memory, or os socket thing)
+### TCP
+From load file to saved file, locally transferring a 760MB file took 1m09s or had a throughput of about 11MBps.
+
+
+# TODO
+- Comprehensive tests that check for more paths/cases
+- Cleaning up the code base
+  - Standardizing naming, style
+  - Ordering chunks in more reasonable ways
+  - Documentation/code hints/comments
+- Fix general bugs or undesirable behavior
+- optimize/streamline internals
+- Use the data structures to work on nat traversal

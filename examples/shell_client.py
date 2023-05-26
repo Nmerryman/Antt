@@ -19,6 +19,9 @@ dl [src name] - Download file""")
     while client.alive and client.verified_connection:
         command = input("> ")
 
+        if command == "dc":
+            code.interact(local=locals())
+
         parts = command.split()
         if '"' in command:  # If there are quotes we assume that the spaces are all part of the same value
             command_packet = ds.Packet(parts[0], " ".join(parts[1:])[1:-1]).generate()
@@ -26,7 +29,7 @@ dl [src name] - Download file""")
             command_packet = ds.Packet(*parts).generate()
         client.in_queue.put(command_packet)
 
-        # show progress if transfer takes more than 5s
+        # show progress if transfer takes more than 5s (For UDP)
         start_wait = time.time()
         last_len = 0
         while client.out_queue.empty():
@@ -37,6 +40,18 @@ dl [src name] - Download file""")
                     print(len(temp_data[0]) - 1, temp_data[1])
                     last_len = len(temp_data[0])
         client.last_updated = None
+
+        # show progress if transfer takes more than 5s (For TCP)
+        # start_wait = time.time()
+        # last_len = 0
+        # while client.out_queue.empty():
+        #     time.sleep(.5)
+        #     if time.time() - start_wait > 5 and client.last_updated:
+        #         temp_len = len(client.pre_parsed)
+        #         if temp_len != last_len:
+        #             print(temp_len, client.last_updated)
+        #             last_len = temp_len
+        # client.last_updated = None
 
         # Extract message from out_queue
         response_raw = client.block_until_message()
@@ -54,3 +69,5 @@ dl [src name] - Download file""")
             with open(local_name, "wb") as f:
                 f.write(response.value)
             print("file received")
+
+    print(client.alive, client.verified_connection)
